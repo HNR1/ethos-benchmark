@@ -2,11 +2,11 @@
 #SBATCH --job-name=ethos_train::proj=IRB2023P002279,
 #SBATCH --time=3-0
 #SBATCH --partition=defq
-#SBATCH --gres=gpu:8
+#SBATCH --gres=gpu:1
 #SBATCH --output=ethos_train.log
 
 # this script is intended to be run from the project root
-export OMP_NUM_THREADS=1
+export OMP_NUM_THREADS=2
 
 dataset="mimic_ed"
 dataset_name="mimic"
@@ -18,8 +18,6 @@ if [[ ! -d $data_path ]]; then
     echo "Dataset directory not found: $data_path"
     exit 1
 fi
-
-shift 1
 
 BATCH_SIZE=32
 N_POSITIONS=2048
@@ -50,8 +48,13 @@ pip install \
 export TORCHINDUCTOR_CACHE_DIR=/ethos/torchinductor_cache
 "
 
+echo "SLURM_GPUS_ON_NODE=${SLURM_GPUS_ON_NODE}"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
+echo "NUM_GPUS=${NUM_GPUS}"
+
 script_body="
-torchrun --no_python --standalone --nproc_per_node=\${NUM_GPUS} ethos_train \
+set -x
+ethos_train \
   data_fp=$data_path/train \
   data_fp_val=$data_path/val \
   val_size=6 \

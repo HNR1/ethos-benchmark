@@ -48,6 +48,11 @@ def main(cfg: DictConfig):
     model_type = ModelType(cfg.model_type)
 
     device = cfg.device
+    print(f"Training device: {device}")
+    if device.startswith("cuda"):
+        print(f"GPU: {th.cuda.get_device_name(0)}")
+    else:
+        raise ValueError(f"Unsupported device: {device}")
     out_dir = Path(cfg.out_dir)
     # various inits, derived attributes, I/O setup
     ddp = int(os.environ.get("RANK", -1)) != -1  # is this a ddp run?
@@ -84,8 +89,14 @@ def main(cfg: DictConfig):
     vocab = train_dataset.vocab
 
     vocab_size = math.ceil(len(vocab) / 64) * 64
+    
+    val_dataset = TimelineDataset(
+        cfg.data_fp_val,
+        n_positions=cfg.n_positions,
+        is_encoder_decoder=model_type == ModelType.ENC_DECODER,
+    )
 
-    train_dataset, val_dataset = train_dataset.train_test_split(cfg.val_size)
+    # train_dataset, val_dataset = train_dataset.train_test_split(cfg.val_size)
     train_dataloader, val_dataloader = (
         DataLoader(
             dataset,

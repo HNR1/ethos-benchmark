@@ -10,8 +10,10 @@ if [[ -n "$suffix" && ! "$suffix" =~ ^[-_] ]]; then
     suffix="-$suffix"
 fi
 
-input_dir="data/mimic-2.2-meds${suffix//_/-}/data"
-output_dir="data/tokenized_datasets/mimic${suffix//-/_}"
+# input_dir="data/mimic-2.2-meds${suffix//_/-}/data"
+# output_dir="data/tokenized_datasets/mimic${suffix//-/_}"
+input_dir="../../../mnt/data_share/project_henri/next-ehr/mimic-meds-ed/data"
+output_dir="../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized"
 
 singularity_preamble="
 export PATH=\$HOME/.local/bin:\$PATH
@@ -35,6 +37,12 @@ ethos_tokenize -m worker='range(0,7)' \
     input_dir=$input_dir/train \
     output_dir=$output_dir \
     out_fn=train
+
+ethos_tokenize -m worker='range(0,2)' \
+    input_dir=$input_dir/val \
+    vocab=$output_dir/train \
+    output_dir=$output_dir \
+    out_fn=val
 
 ethos_tokenize -m worker='range(0,2)' \
     input_dir=$input_dir/test \
