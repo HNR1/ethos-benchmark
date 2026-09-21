@@ -5,13 +5,12 @@
 #SBATCH --gres=gpu:8
 #SBATCH --output=ethos_train.log
 
-# this script is intended to be run from the project root
+# this script is intended to be run from the project root with: GPU_IDS=1,2 uv run -- bash scripts/run_training.sh device=cuda
 export OMP_NUM_THREADS=1
 
 dataset="mimic_ed"
 dataset_name="mimic"
 
-# data_path=data/tokenized_datasets/$dataset
 data_path=../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized
 clear
 if [[ ! -d $data_path ]]; then
@@ -19,7 +18,9 @@ if [[ ! -d $data_path ]]; then
     exit 1
 fi
 
-shift 1
+GPU_IDS="${GPU_IDS:-}"
+
+# shift 1
 
 BATCH_SIZE=32
 N_POSITIONS=2048
@@ -65,7 +66,7 @@ torchrun --no_python --standalone --nproc_per_node=\${NUM_GPUS} ethos_train \
   min_lr=$MIN_LR \
   log_interval=10 \
   eval_interval=1500 \
-  gradient_accumulation_steps=16 \
+  gradient_accumulation_steps=12 \
   warmup_iters=5000 \
   max_iters=200000 \
   lr_decay_iters=100000 \
@@ -78,8 +79,28 @@ torchrun --no_python --standalone --nproc_per_node=\${NUM_GPUS} ethos_train \
 
 module load singularity 2>/dev/null
 
+# GPU selection
+# Leave empty to use all GPUs available to the job.
+if [[ -n "${GPU_IDS:-}" ]]; then
+    export CUDA_VISIBLE_DEVICES="$GPU_IDS"
+fi
+
+# Count GPUs visible to the process.
+if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+    NUM_GPUS=$(awk -F',' '{print NF}' <<< "$CUDA_VISIBLE_DEVICES")
+elif [[ -n "${SLURM_GPUS_ON_NODE:-}" ]]; then
+    NUM_GPUS="${SLURM_GPUS_ON_NODE}"
+else
+    NUM_GPUS=$(nvidia-smi --list-gpus 2>/dev/null | wc -l)
+fi
+
+export NUM_GPUS
+
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<all>}"
+echo "NUM_GPUS=${NUM_GPUS}"
+
 if command -v singularity >/dev/null; then
-    export NUM_GPUS=${SLURM_GPUS_ON_NODE}
+
     singularity exec \
         --contain \
         --nv \
@@ -88,8 +109,9 @@ if command -v singularity >/dev/null; then
         --bind /mnt:/mnt \
         ethos.sif \
         bash -c "${singularity_preamble}${script_body}"
+
 else
-    NUM_GPUS=$(nvidia-smi --list-gpus 2>/dev/null | wc -l)
-    export NUM_GPUS
+
     bash -c "${script_body}"
+
 fi

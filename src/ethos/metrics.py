@@ -22,8 +22,8 @@ def compute_basic_metrics(y_true, y_pred):
     return {
         "n": len(y_true),
         "prevalence": y_true.mean(),
-        "auc": roc_auc_score(y_true, y_pred),
-        "auprc": -np.trapezoid(*roc_curve(y_true, y_pred)[:2]),
+        "auc": roc_auc_score(y_true, y_pred), 
+        "auprc": np.trapezoid(*roc_curve(y_true, y_pred)[:2]),
     }
 
 
@@ -194,7 +194,7 @@ def compute_fitted_metrics(
     f1 = tp / (tp + (fp + fn) / 2)
 
     precision_points, recall_points, _ = precision_recall_curve(y_true, y_pred)
-
+    
     return {
         "auc": auc,
         "auprc": auprc,
@@ -250,7 +250,9 @@ def print_auc_roc_plot(res, fitted_res, title="AUC-ROC", lw=2, clinical=False):
         text.extend(
             [
                 f"auc={res['auc']:.3f}",
+                f"auprc={res['auprc']:.3f}",
                 f"fitted_auc={fitted_res['auc']:.3f}",
+                f"fitted_auprc={fitted_res['auprc']:.3f}",
                 f"fitted_f1-score={fitted_res['f1']:.3f}",
                 f"fitted_precision={fitted_res['precision']:.3f}",
                 f"fitted_recall={fitted_res['recall']:.3f}",

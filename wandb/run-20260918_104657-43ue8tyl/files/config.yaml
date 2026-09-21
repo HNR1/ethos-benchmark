@@ -1,0 +1,169 @@
+_wandb:
+    value:
+        cli_version: 0.29.0
+        e:
+            n2kw8wdmztj3fivu8puo4gmrbdi84fft:
+                args:
+                    - data_fp=../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized/train
+                    - data_fp_val=../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized/val
+                    - val_size=6
+                    - batch_size=32
+                    - n_positions=2048
+                    - n_layer=6
+                    - n_head=12
+                    - n_embd=768
+                    - dropout=0.3
+                    - lr=0.0006
+                    - min_lr=0.00001
+                    - log_interval=10
+                    - eval_interval=1500
+                    - gradient_accumulation_steps=12
+                    - warmup_iters=5000
+                    - max_iters=200000
+                    - lr_decay_iters=100000
+                    - wandb_log=true
+                    - wandb_project=ethos-meds-mimic
+                    - wandb_run_name=layer_6_do_0.3
+                    - device=cuda
+                    - out_dir=../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized/models/layer_6_do_0.3
+                codePath: .venv/bin/ethos_train
+                codePathLocal: .venv/bin/ethos_train
+                cpu_count: 48
+                cpu_count_logical: 48
+                cudaVersion: "12.9"
+                disk:
+                    /:
+                        total: "3193583370240"
+                        used: "2870420049920"
+                email: lakebd@web.de
+                executable: /home/henri/ethos-benchmark/.venv/bin/python
+                git:
+                    commit: bbb0631e42ad22b8d6fbcdf679433f27c58dd369
+                    remote: https://github.com/HNR1/ethos-benchmark.git
+                gpu: NVIDIA RTX A6000
+                gpu_count: 3
+                gpu_nvidia:
+                    - architecture: Ampere
+                      cudaCores: 10752
+                      memoryTotal: "51527024640"
+                      name: NVIDIA RTX A6000
+                      uuid: GPU-3a50b048-9452-e351-690e-70445572ff97
+                    - architecture: Ampere
+                      cudaCores: 10752
+                      memoryTotal: "51527024640"
+                      name: NVIDIA RTX A6000
+                      uuid: GPU-e54e6ccb-bdda-83a4-d357-e28f6f84335e
+                    - architecture: Ampere
+                      cudaCores: 10752
+                      memoryTotal: "51527024640"
+                      name: NVIDIA RTX A6000
+                      uuid: GPU-883f2125-dcdd-39d6-3e8d-5b746b13f699
+                host: hs-lis-promo-nano
+                memory:
+                    total: "541029904384"
+                os: Linux-6.8.0-139-generic-x86_64-with-glibc2.39
+                program: /home/henri/ethos-benchmark/.venv/bin/ethos_train
+                python: CPython 3.12.13
+                root: /home/henri/ethos-benchmark
+                startedAt: "2026-09-18T08:46:57.928711Z"
+                writerId: n2kw8wdmztj3fivu8puo4gmrbdi84fft
+        m: []
+        python_version: 3.12.13
+        t:
+            "1":
+                - 1
+                - 5
+                - 11
+                - 49
+                - 50
+                - 53
+            "2":
+                - 1
+                - 5
+                - 11
+                - 49
+                - 50
+                - 53
+            "3":
+                - 13
+                - 15
+                - 16
+            "4": 3.12.13
+            "5": 0.29.0
+            "6": 4.52.4
+            "12": 0.29.0
+            "13": linux-x86_64
+activation:
+    value: gelu
+backend:
+    value: nccl
+batch_size:
+    value: 32
+beta1:
+    value: 0.9
+beta2:
+    value: 0.95
+data_fp:
+    value: ../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized/train
+data_fp_val:
+    value: ../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized/val
+dataset:
+    value: mimic-tokenized
+device:
+    value: cuda
+dropout:
+    value: 0.3
+dtype:
+    value: bfloat16
+eval_interval:
+    value: 1500
+grad_clip:
+    value: 1
+gradient_accumulation_steps:
+    value: 4
+log_interval:
+    value: 10
+lr:
+    value: 0.0006
+lr_decay_iters:
+    value: 100000
+max_iters:
+    value: 200000
+min_lr:
+    value: 1e-05
+model_num_params:
+    value: 45967104
+model_num_params_total:
+    value: 47539968
+model_type:
+    value: decoder
+n_embd:
+    value: 768
+n_head:
+    value: 12
+n_layer:
+    value: 6
+n_positions:
+    value: 2048
+no_compile:
+    value: false
+out_dir:
+    value: ../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized/models/layer_6_do_0.3
+resume:
+    value: false
+val_size:
+    value: 6
+vocab_size:
+    value: 4481
+vocab_size_train:
+    value: 4544
+wandb_log:
+    value: true
+wandb_project:
+    value: ethos-meds-mimic
+wandb_run_name:
+    value: layer_6_do_0.3
+warmup_iters:
+    value: 5000
+weight_decay:
+    value: 0.1
