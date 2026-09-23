@@ -1,5 +1,11 @@
 name: mimic
 stages:
+  - name: remove_admissions_after_death
+
+  - name: align_death_time_to_next_discharge
+
+  - name: remove_rows_after_death
+
   - name: filter_codes
     params:
       codes_to_remove:

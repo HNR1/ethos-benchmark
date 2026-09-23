@@ -1,9 +1,10 @@
-uv run ethos_tokenize -m worker='range(0,7)' \  
-    input_dir="../../../mnt/data_share/project_henri/next-ehr/mimic-meds-ed" \ 
-    output_dir="../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized" \
-    out_fn=train
-
-    ethos_tokenize -m worker='range(0,7)' \
+ethos_tokenize -m worker='range(0,7)' \
     input_dir=$input_dir/train \
     output_dir=$output_dir \
     out_fn=train
+
+ethos_tokenize -m worker='range(0,2)' \
+    input_dir=$input_dir/val \
+    vocab=$output_dir/train \
+    output_dir=$output_dir \
+    out_fn=val
