@@ -11,7 +11,8 @@ export OMP_NUM_THREADS=1
 dataset="mimic_ed"
 dataset_name="mimic"
 
-data_path=../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized
+# data_path=../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized
+data_path=data/mimic-tokenized
 clear
 if [[ ! -d $data_path ]]; then
     echo "Dataset directory not found: $data_path"

@@ -1,0 +1,113 @@
+{
+  "os":  "Linux-5.15.0-191-generic-x86_64-with-glibc2.35",
+  "python":  "CPython 3.13.15",
+  "startedAt":  "2026-09-24T09:13:08.024034Z",
+  "args":  [
+    "data_fp=data/mimic-tokenized/train",
+    "data_fp_val=data/mimic-tokenized/val",
+    "val_size=6",
+    "batch_size=32",
+    "n_positions=2048",
+    "n_layer=6",
+    "n_head=12",
+    "n_embd=768",
+    "dropout=0.3",
+    "lr=0.0006",
+    "min_lr=0.00001",
+    "log_interval=10",
+    "eval_interval=1500",
+    "gradient_accumulation_steps=12",
+    "warmup_iters=5000",
+    "max_iters=200000",
+    "lr_decay_iters=100000",
+    "wandb_log=true",
+    "wandb_project=ethos-meds-mimic",
+    "wandb_run_name=layer_6_do_0.3",
+    "device=cuda",
+    "out_dir=data/mimic-tokenized/models/layer_6_do_0.3"
+  ],
+  "program":  "/home/hb101@hsg.privat/ethos-benchmark/.venv/bin/ethos_train",
+  "codePath":  ".venv/bin/ethos_train",
+  "codePathLocal":  ".venv/bin/ethos_train",
+  "git":  {
+    "remote":  "https://github.com/HNR1/ethos-benchmark.git",
+    "commit":  "161d6a56ce54c7195ee2b5087f551a91a7e2bcf3"
+  },
+  "email":  "lakebd@web.de",
+  "root":  "/home/hb101@hsg.privat/ethos-benchmark",
+  "host":  "HS-LIS-GPU01",
+  "executable":  "/home/hb101@hsg.privat/ethos-benchmark/.venv/bin/python",
+  "cpu_count":  48,
+  "cpu_count_logical":  96,
+  "gpu":  "NVIDIA A100 80GB PCIe",
+  "gpu_count":  8,
+  "disk":  {
+    "/":  {
+      "total":  "686370996224",
+      "used":  "53171785728"
+    }
+  },
+  "memory":  {
+    "total":  "2151677419520"
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA A100 80GB PCIe",
+      "memoryTotal":  "85899345920",
+      "cudaCores":  6912,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-cb5ff3f0-6ffb-398e-7fe8-14c9ce707707"
+    },
+    {
+      "name":  "NVIDIA A100 80GB PCIe",
+      "memoryTotal":  "85899345920",
+      "cudaCores":  6912,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-2c830f08-bbaa-cc6e-0b0e-23ac5e1fb436"
+    },
+    {
+      "name":  "NVIDIA A100 80GB PCIe",
+      "memoryTotal":  "85899345920",
+      "cudaCores":  6912,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-c7263ed5-d18c-5c8a-d0c2-e7cb6135eee8"
+    },
+    {
+      "name":  "NVIDIA A100 80GB PCIe",
+      "memoryTotal":  "85899345920",
+      "cudaCores":  6912,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-a9072052-06c3-b406-40f5-4bc86b38e688"
+    },
+    {
+      "name":  "NVIDIA A100 80GB PCIe",
+      "memoryTotal":  "85899345920",
+      "cudaCores":  6912,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-b88e24d1-4754-8945-2475-760703eb0293"
+    },
+    {
+      "name":  "NVIDIA A100 80GB PCIe",
+      "memoryTotal":  "85899345920",
+      "cudaCores":  6912,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-d29f1ddf-3a1b-2653-4cc5-dfdc40e0c938"
+    },
+    {
+      "name":  "NVIDIA A100 80GB PCIe",
+      "memoryTotal":  "85899345920",
+      "cudaCores":  6912,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-79126554-da67-e293-8fd1-f8914cb4cdd5"
+    },
+    {
+      "name":  "NVIDIA A100 80GB PCIe",
+      "memoryTotal":  "85899345920",
+      "cudaCores":  6912,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-29557322-0d7c-7be9-d144-7dce8780da07"
+    }
+  ],
+  "cudaVersion":  "13.0",
+  "writerId":  "2znsoyxkdkkgzwipibbywrkiek9al4sc"
+}
