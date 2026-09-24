@@ -7,6 +7,7 @@ data/
 results/
 cache/
 multirun/
+wandb/
 
 # CMake
 cmake-build-*/
