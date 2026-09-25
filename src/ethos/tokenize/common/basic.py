@@ -25,7 +25,7 @@ def remove_rows_after_death(df: pl.DataFrame) -> pl.DataFrame:
             | (pl.col("time") <= pl.col("death_time"))
         )
         .drop("death_time")
-        .sort(["subject_id", "time"])
+        .sort(["subject_id", "time"], nulls_last=False)
     )
 
 
@@ -53,71 +53,58 @@ def remove_admissions_after_death(df: pl.DataFrame) -> pl.DataFrame:
             on=["subject_id", "hadm_id"],
             how="anti",
         )
-        .sort(["subject_id", "time"])
+        .sort(["subject_id", "time"], nulls_last=False)
     )
 
 
 def align_death_time_to_next_discharge(df: pl.DataFrame) -> pl.DataFrame:
+    # Give every original row a unique ID
+    df = df.with_row_index("_row_id")
+
+    # Death events
     deaths = (
-        df.filter(pl.col("code") == "MEDS_DEATH")
-        .select(
-            ["subject_id", "time"]
-        )
-        .rename({"time": "death_time"})
-    )
-
-    discharges = (
-        df.filter(pl.col("code").str.contains("HOSPITAL_DISCHARGE"))
-        .select(
-            ["subject_id", "time"]
-        )
-        .rename({"time": "discharge_time"})
-    )
-
-    # Match each death to all later discharges for the same patient,
-    # then keep the first (earliest) discharge after the death.
-    death_discharge = (
-        deaths.join(discharges, on="subject_id", how="left")
-        .filter(pl.col("discharge_time") > pl.col("death_time"))
-        .group_by(["subject_id", "death_time"])
-        .agg(pl.col("discharge_time").min().alias("new_time"))
-    )
-
-    # Add a unique row identifier so multiple death events at the
-    # same timestamp can be handled correctly.
-    df_with_id = df.with_row_index("_row_id")
-
-    death_rows = (
-        df_with_id
+        df
         .filter(pl.col("code") == "MEDS_DEATH")
-        .select(["_row_id", "subject_id", "time"])
-        .rename({"time": "death_time"})
-    )
-
-    death_updates = (
-        death_rows
-        .join(
-            death_discharge,
-            on=["subject_id", "death_time"],
-            how="left",
+        .select(
+            "_row_id",
+            "subject_id",
+            pl.col("time").alias("death_time"),
         )
-        .select(["_row_id", "new_time"])
     )
 
+    # All discharge events
+    discharges = (
+        df
+        .filter(pl.col("code").str.contains("HOSPITAL_DISCHARGE"))
+        .select(
+            "subject_id",
+            pl.col("time").alias("discharge_time"),
+        )
+    )
+
+    # For every death, find the earliest discharge strictly after it
+    death_updates = (
+        deaths
+        .join(discharges, on="subject_id", how="left")
+        .filter(pl.col("discharge_time") > pl.col("death_time"))
+        .group_by("_row_id")
+        .agg(
+            pl.col("discharge_time").min().alias("new_time")
+        )
+    )
+
+    # Update only death rows that have a subsequent discharge
     return (
-        df_with_id
+        df
         .join(death_updates, on="_row_id", how="left")
         .with_columns(
-            pl.when(
-                (pl.col("code") == "MEDS_DEATH")
-                & pl.col("new_time").is_not_null()
-            )
+            pl.when(pl.col("new_time").is_not_null())
             .then(pl.col("new_time"))
             .otherwise(pl.col("time"))
             .alias("time")
         )
         .drop(["_row_id", "new_time"])
-        .sort(["subject_id", "time"])
+        .sort(["subject_id", "time"], nulls_last=False)
         .with_row_index()
         .drop("index")
     )
