@@ -22,6 +22,7 @@ def remove_rows_after_death(df: pl.DataFrame) -> pl.DataFrame:
         df.join(death_times, on="subject_id", how="left")
         .filter(
             pl.col("death_time").is_null()
+            | pl.col("time").is_null()
             | (pl.col("time") <= pl.col("death_time"))
         )
         .drop("death_time")
