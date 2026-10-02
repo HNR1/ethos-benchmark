@@ -32,16 +32,12 @@ set -e
 
 clear
 
-ethos_tokenize -m worker='range(0,7)' \
-    input_dir=$input_dir/train \
-    output_dir=$output_dir \
-    out_fn=train
-
-ethos_tokenize -m worker='range(0,2)' \
-    input_dir=$input_dir/val \
+ethos_tokenize -m --config-name=tokenization_test \
+    worker='range(0,2)' \
+    input_dir=$input_dir/test \
     vocab=$output_dir/train \
     output_dir=$output_dir \
-    out_fn=val
+    out_fn=test
 "
 
 module load singularity 2>/dev/null

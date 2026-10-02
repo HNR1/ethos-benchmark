@@ -114,7 +114,7 @@ class ICUMortalityDataset(HospitalMortalityBase):
         )
 
 
-class ICUReadmissionDataset(InferenceDataset):
+class ICUReadmissionDatasetDepr(InferenceDataset):
     """To talk about ICU readmission, there has to be at least one ICU stay within a hospital
     stay."""
 
@@ -132,8 +132,9 @@ class ICUReadmissionDataset(InferenceDataset):
 
         has_icu_stay = th.isin(adm_icu_dc_or_dc_indices, icu_dc_indices)
         self.icu_dc_indices = adm_icu_dc_or_dc_indices[has_icu_stay]
-
+        
         icu_adm_or_dc_indices = self._get_indices_of_stokens(self.stop_stokens)
+        
         self.outcome_indices = self._match(icu_adm_or_dc_indices, self.icu_dc_indices)
 
     def __len__(self) -> int:
@@ -153,3 +154,60 @@ class ICUReadmissionDataset(InferenceDataset):
             "prediction_time": self.times[icu_dc_idx].item(),
             "data_idx": icu_dc_idx.item(),
         }
+
+
+class ICUReadmissionDataset(InferenceDataset):
+    """Generates timelines that terminate at the DRG (Diagnosis-Related Group) token associated with
+    hospital stays.
+
+    The target variable is the patient's next admission.
+    """
+
+    def __init__(self, input_dir: str | Path, n_positions: int = 2048, **kwargs):
+        super().__init__(input_dir, n_positions, **kwargs)
+        self.stop_stokens = [ST.ICU_ADMISSION, ST.DISCHARGE] + self.stop_stokens
+
+        adm_indices = self._get_indices_of_stokens(ST.ICU_ADMISSION)
+        dc_indices  = self._get_indices_of_stokens(ST.ICU_DISCHARGE)
+        # Remove cases when the patient died in the hospital, so discharge is not preceded by death
+        death_indices = self._get_indices_of_stokens(ST.DEATH)
+        death_b4_disc = (
+            (death_indices[:, None] > adm_indices[None, :]) &
+            (death_indices[:, None] < dc_indices[None, :])
+        ).any(dim=0)
+        disc_b4_adm = dc_indices <= adm_indices
+        valid_stays = ~death_b4_disc & ~disc_b4_adm
+        print(len(death_b4_disc.nonzero()), "deaths before discharge")
+        print(len(disc_b4_adm.nonzero()), "discharges before admission")
+        self.dc_indices = dc_indices[valid_stays]
+
+        adm_or_death_indices = self._get_indices_of_stokens(
+            [ST.ICU_ADMISSION, ST.DEATH, ST.TIMELINE_END]
+        )
+        self.outcome_indices = self._match(adm_or_death_indices, self.dc_indices)
+
+        drg_indices = self._get_indices_of_stokens(
+            [stoken for stoken in self.vocab if stoken.startswith("DRG//")]
+        )
+        self.start_indices = self._match(drg_indices, self.dc_indices)
+        
+        print(len(self.start_indices), len(self.dc_indices), len(self.outcome_indices))
+                
+    def __len__(self) -> int:
+        return len(self.start_indices)
+
+    def __getitem__(self, idx) -> tuple[th.Tensor, dict]:
+        icu_dc_idx = self.dc_indices[idx]
+        outcome_idx = self.outcome_indices[idx]
+
+        return super().__getitem__(icu_dc_idx), {
+            "expected": self.vocab.decode(self.tokens[outcome_idx]),
+            "true_token_dist": (outcome_idx - icu_dc_idx).item(),
+            "true_token_time": (self.times[outcome_idx] - self.times[icu_dc_idx]).item(),
+            "icu_stay_id_start": self._get_icu_stay_id(icu_dc_idx),
+            "icu_stay_id_outcome": self._get_icu_stay_id(outcome_idx),
+            "patient_id": self.patient_id_at_idx[icu_dc_idx].item(),
+            "prediction_time": self.times[icu_dc_idx].item(),
+            "data_idx": icu_dc_idx.item(),
+        }
+    

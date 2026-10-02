@@ -8,6 +8,7 @@ results/
 cache/
 multirun/
 wandb/
+outputs/
 
 # CMake
 cmake-build-*/

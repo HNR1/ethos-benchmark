@@ -19,10 +19,22 @@ class HospitalMortalityBase(InferenceDataset, abc.ABC):
     ):
         super().__init__(input_dir, n_positions, **kwargs)
         self.stop_stokens = [dc_stoken] + self.stop_stokens
+        
+        adm_indices = self._get_indices_of_stokens(adm_stoken)
+        dc_indices  = self._get_indices_of_stokens(dc_stoken)
+        dth_indices = self._get_indices_of_stokens(ST.DEATH)
+        disc_b4_adm = dc_indices <= adm_indices
+        print(len(adm_indices), "admissions,", len(dc_indices), "discharges,", len(dth_indices), "deaths found.")
+        adm_indices = adm_indices[~disc_b4_adm]
+        dc_indices  = dc_indices[~disc_b4_adm]
 
-        self.start_indices = self._get_indices_of_stokens(adm_stoken) + adm_offset
-        dc_or_dth_indices = self._get_indices_of_stokens([dc_stoken, ST.DEATH])
+        self.start_indices = adm_indices + adm_offset
+        dc_or_dth_indices = th.tensor(list(sorted(set(dc_indices).union(set(dth_indices)))))
         self.outcome_indices = self._match(dc_or_dth_indices, self.start_indices)
+        invalid = self.outcome_indices < self.start_indices
+        self.start_indices = self.start_indices[~invalid]
+        self.outcome_indices = self.outcome_indices[~invalid]
+        print(f"Found {len(self.start_indices)} hospital stays with an outcome token.")
 
     def __len__(self) -> int:
         return len(self.start_indices)
