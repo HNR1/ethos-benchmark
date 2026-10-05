@@ -83,6 +83,8 @@ class ICUAdmissionDataset(InferenceDataset):
             [ST.DISCHARGE, ST.ICU_ADMISSION, ST.DEATH]
         )
         self.outcome_indices = self._match(icu_adm_or_dc_or_dth_indices, self.adm_indices)
+        
+        print(len(self.adm_indices), len(self.outcome_indices))
 
     def __len__(self) -> int:
         return len(self.adm_indices)
