@@ -99,6 +99,7 @@ class ICUAdmissionDataset(InferenceDataset):
             "true_token_time": (self.times[outcome_idx] - self.times[start_idx]).item(),
             "icu_stay_id": self._get_icu_stay_id(outcome_idx),
             "patient_id": self.patient_id_at_idx[start_idx].item(),
+            "hadm_id": self._get_hadm_id(outcome_idx),
             "prediction_time": self.times[start_idx].item(),
             "data_idx": start_idx.item(),
         }
