@@ -51,7 +51,7 @@ class HospitalMortalityBase(InferenceDataset, abc.ABC):
             "data_idx": start_idx.item(),
         }
         if self.is_mimic:
-            y["hadm_id"] = self._get_hadm_id(start_idx)
+            y["hadm_id"] = self._get_hadm_id(start_idx-2)
             y["icu_stay_id"] = self._get_icu_stay_id(start_idx)
 
         return super().__getitem__(start_idx), y

@@ -103,6 +103,11 @@ def _align_admission_time_to_first_event(df: pl.DataFrame, type: str = 'HOSP') -
         .filter(
             pl.col(id_col).is_not_null()
             & pl.col("time").is_not_null()
+            & ~pl.col("code").str.contains('ICD//')
+            & ~pl.col("code").str.contains('MEDICATION//')
+            & ~pl.col("code").str.contains('HCPCS//')
+            & ~pl.col("code").str.contains('TRANSFER_TO//ED//')
+            & ~pl.col("code").str.contains('ED_')
         )
         .group_by(id_col)
         .agg(
@@ -153,7 +158,7 @@ def _align_admission_time_to_first_event(df: pl.DataFrame, type: str = 'HOSP') -
         )
         .drop(["_row_id", "new_time"])
         .sort(
-            ["subject_id", "time"],
+            ["subject_id", "time", "hadm_id", "icustay_id"],
             nulls_last=False,
         )
         .with_row_index()
@@ -179,6 +184,9 @@ def _align_discharge_time_to_last_event(df: pl.DataFrame, type: str = 'HOSP') ->
         .filter(
             pl.col(id_col).is_not_null()
             & pl.col("time").is_not_null()
+            & ~pl.col("code").str.contains('ICD//')
+            & ~pl.col("code").str.contains('MEDICATION//')
+            & ~pl.col("code").str.contains('TRANSFER_TO//')
         )
         .group_by(id_col)
         .agg(
@@ -208,6 +216,26 @@ def _align_discharge_time_to_last_event(df: pl.DataFrame, type: str = 'HOSP') ->
         .filter(
             pl.col("last_event_time") > pl.col("discharge_time")
         )
+        # .select(
+        #     "_row_id",
+        #     pl.col("last_event_time").alias("new_time"),
+        # )
+    )
+    
+    rows_to_update = (
+        df
+        .join(
+            discharge_updates,
+            on=id_col,
+            how="inner",
+        )
+        .filter(
+            (
+                pl.col("code").str.contains(discharge_code)
+                | pl.col("code").str.contains("DRG//")
+            )
+            & (pl.col("time") == pl.col("discharge_time"))
+        )
         .select(
             "_row_id",
             pl.col("last_event_time").alias("new_time"),
@@ -217,7 +245,7 @@ def _align_discharge_time_to_last_event(df: pl.DataFrame, type: str = 'HOSP') ->
     return (
         df
         .join(
-            discharge_updates,
+            rows_to_update,
             on="_row_id",
             how="left",
         )
@@ -227,11 +255,20 @@ def _align_discharge_time_to_last_event(df: pl.DataFrame, type: str = 'HOSP') ->
             .otherwise(pl.col("time"))
             .alias("time")
         )
+        .with_columns(
+            pl.when(pl.col("code").str.contains(discharge_code))
+            .then(0)
+            .when(pl.col("code").str.contains("DRG//"))
+            .then(1)
+            .otherwise(2)
+            .alias("_sort_order")
+        )
         .drop(["_row_id", "new_time"])
         .sort(
-            ["subject_id", "time", "hadm_id", "icustay_id"],
+            ["subject_id", "time", "_sort_order", "hadm_id", "icustay_id"],
             nulls_last=False,
         )
+        .drop("_sort_order")
         .with_row_index()
         .drop("index")
     )
@@ -285,6 +322,47 @@ def align_death_time_to_next_discharge(df: pl.DataFrame) -> pl.DataFrame:
         )
         .drop(["_row_id", "new_time"])
         .sort(["subject_id", "time"], nulls_last=False)
+        .with_row_index()
+        .drop("index")
+    )
+
+
+def manual_fixes(df: pl.DataFrame) -> pl.DataFrame:
+    target_time = pl.datetime(2173, 9, 23, 0, 0, 0)
+
+    return (
+        df
+        # Set the time for the specific target event
+        .with_columns(
+                pl.when(
+                    (pl.col("hadm_id") == 28241666.0)
+                    & (pl.col("code").str.contains("HOSPITAL_ADMISSION"))
+                )
+                .then(target_time)
+                .otherwise(pl.col("time"))
+                .alias("time")
+            )
+            # Temporary key to control ordering of events at the same timestamp
+            .with_columns(
+                pl.when(pl.col("code").str.contains("HOSPITAL_DISCHARGE"))
+                .then(0)
+                .when(pl.col("code").str.contains("HOSPITAL_ADMISSION"))
+                .then(1)
+                .otherwise(0)
+                .alias("_event_order")
+            )
+        # Sort discharge before admission when subject_id + time are equal
+        .sort(
+            [
+                "subject_id",
+                "time",
+                "_event_order",
+                "hadm_id",
+                "icustay_id",
+            ],
+            nulls_last=False,
+        )
+        .drop("_event_order")
         .with_row_index()
         .drop("index")
     )

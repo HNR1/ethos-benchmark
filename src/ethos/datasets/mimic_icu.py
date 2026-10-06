@@ -99,7 +99,7 @@ class ICUAdmissionDataset(InferenceDataset):
             "true_token_time": (self.times[outcome_idx] - self.times[start_idx]).item(),
             "icu_stay_id": self._get_icu_stay_id(outcome_idx),
             "patient_id": self.patient_id_at_idx[start_idx].item(),
-            "hadm_id": self._get_hadm_id(outcome_idx),
+            "hadm_id": self._get_hadm_id(start_idx-2),
             "prediction_time": self.times[start_idx].item(),
             "data_idx": start_idx.item(),
         }
@@ -185,7 +185,7 @@ class ICUReadmissionDataset(InferenceDataset):
         self.dc_indices = dc_indices[valid_stays]
 
         adm_or_death_indices = self._get_indices_of_stokens(
-            [ST.ICU_ADMISSION, ST.DEATH, ST.TIMELINE_END]
+            [ST.ICU_ADMISSION, ST.DEATH, ST.TIMELINE_END, ST.DISCHARGE, ST.ADMISSION]
         )
         self.outcome_indices = self._match(adm_or_death_indices, self.dc_indices)
 

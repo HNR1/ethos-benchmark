@@ -6,6 +6,8 @@ stages:
 
   - name: remove_rows_after_death
 
+  - name: manual_fixes
+
   - name: filter_codes
     params:
       codes_to_remove:
