@@ -1,6 +1,7 @@
 import pickle
 from collections.abc import Sequence
 from pathlib import Path
+from datetime import datetime
 
 import polars as pl
 
@@ -108,6 +109,7 @@ def _align_admission_time_to_first_event(df: pl.DataFrame, type: str = 'HOSP') -
             & ~pl.col("code").str.contains('HCPCS//')
             & ~pl.col("code").str.contains('TRANSFER_TO//ED//')
             & ~pl.col("code").str.contains('ED_')
+            & ~pl.col("code").str.contains('LAB//')
         )
         .group_by(id_col)
         .agg(
@@ -187,6 +189,7 @@ def _align_discharge_time_to_last_event(df: pl.DataFrame, type: str = 'HOSP') ->
             & ~pl.col("code").str.contains('ICD//')
             & ~pl.col("code").str.contains('MEDICATION//')
             & ~pl.col("code").str.contains('TRANSFER_TO//')
+            & ~pl.col("code").str.contains('ICU_')
         )
         .group_by(id_col)
         .agg(
@@ -328,29 +331,65 @@ def align_death_time_to_next_discharge(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def manual_fixes(df: pl.DataFrame) -> pl.DataFrame:
-    target_time = pl.datetime(2173, 9, 23, 0, 0, 0)
+    time_fixes_adm = {
+        23954106: datetime(2163,  4, 21, 1,  0, 0),
+        24523858: datetime(2129, 10, 20, 0,  0, 0),
+        26728216: datetime(2150,  4, 16, 3, 25, 0),
+        27150516: datetime(2144,  4, 30, 0, 52, 0),
+        28241666: datetime(2173,  9, 23, 0,  0, 0),
+    }
+    time_fixes_dc = {
+        20327393: datetime(2152, 12, 31,  6,  5, 38),
+        24907049: datetime(2129, 11,  2, 13, 50, 21),
+    }
+
+    fixes_adm_df = pl.DataFrame({
+        "hadm_id":  list(time_fixes_adm.keys()),
+        "new_time": list(time_fixes_adm.values()),
+    })
+    fixes_dc_df = pl.DataFrame({
+        "hadm_id":  list(time_fixes_dc.keys()),
+        "new_time": list(time_fixes_dc.values()),
+    })
 
     return (
         df
         # Set the time for the specific target event
+        .join(fixes_adm_df, on="hadm_id", how="left")
         .with_columns(
-                pl.when(
-                    (pl.col("hadm_id") == 28241666.0)
-                    & (pl.col("code").str.contains("HOSPITAL_ADMISSION"))
-                )
-                .then(target_time)
-                .otherwise(pl.col("time"))
-                .alias("time")
+            pl.when(
+                pl.col("new_time").is_not_null()
+                & pl.col("code").str.contains("HOSPITAL_ADMISSION")
             )
-            # Temporary key to control ordering of events at the same timestamp
-            .with_columns(
-                pl.when(pl.col("code").str.contains("HOSPITAL_DISCHARGE"))
-                .then(0)
-                .when(pl.col("code").str.contains("HOSPITAL_ADMISSION"))
-                .then(1)
-                .otherwise(0)
-                .alias("_event_order")
+            .then(pl.col("new_time"))
+            .otherwise(pl.col("time"))
+            .alias("time")
+        )
+        .drop("new_time")
+        .join(fixes_dc_df, on="hadm_id", how="left")
+        .with_columns(
+            pl.when(
+                pl.col("new_time").is_not_null()
+                & (pl.col("code").str.contains("HOSPITAL_DISCHARGE")
+                | pl.col("code").str.contains("DRG//")
+                | pl.col("code").str.contains("DIAGNOSIS//"))
             )
+            .then(pl.col("new_time"))
+            .otherwise(pl.col("time"))
+            .alias("time")
+        )
+        .drop("new_time")
+        # Temporary key to control ordering of events at the same timestamp
+        .with_columns(
+            pl.when(pl.col("code").str.contains("HOSPITAL_DISCHARGE"))
+            .then(0)
+            .when(pl.col("code").str.contains("HOSPITAL_ADMISSION"))
+            .then(1)
+            .when(pl.col("code").str.contains("ICU_ADMISSION"))
+            .then(2)
+            .otherwise(0)
+            .alias("_event_order")
+        )
         # Sort discharge before admission when subject_id + time are equal
         .sort(
             [

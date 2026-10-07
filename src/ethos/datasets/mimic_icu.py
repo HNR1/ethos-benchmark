@@ -77,7 +77,10 @@ class ICUAdmissionDataset(InferenceDataset):
     def __init__(self, input_dir: str | Path, n_positions: int = 2048, **kwargs):
         super().__init__(input_dir, n_positions, **kwargs)
         self.stop_stokens = [ST.ICU_ADMISSION, ST.DISCHARGE] + self.stop_stokens
-        self.adm_indices = self._get_indices_of_stokens(ST.ADMISSION)
+        adm_indices = self._get_indices_of_stokens(ST.ADMISSION)
+        dc_indices  = self._get_indices_of_stokens(ST.DISCHARGE)
+        dc_b4_adm = dc_indices <= adm_indices
+        self.adm_indices = adm_indices[~dc_b4_adm]
 
         icu_adm_or_dc_or_dth_indices = self._get_indices_of_stokens(
             [ST.DISCHARGE, ST.ICU_ADMISSION, ST.DEATH]
