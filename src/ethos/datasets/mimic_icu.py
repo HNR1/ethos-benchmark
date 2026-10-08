@@ -79,7 +79,7 @@ class ICUAdmissionDataset(InferenceDataset):
         self.stop_stokens = [ST.ICU_ADMISSION, ST.DISCHARGE] + self.stop_stokens
         adm_indices = self._get_indices_of_stokens(ST.ADMISSION)
         dc_indices  = self._get_indices_of_stokens(ST.DISCHARGE)
-        dc_b4_adm = dc_indices <= adm_indices
+        dc_b4_adm = (dc_indices < adm_indices)
         self.adm_indices = adm_indices[~dc_b4_adm]
 
         icu_adm_or_dc_or_dth_indices = self._get_indices_of_stokens(

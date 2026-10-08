@@ -60,6 +60,7 @@ class HospitalAdmissionAtTriageDataset(_InferenceAtTriageDataset):
         adm_indices = self._get_indices_of_stokens(ST.ADMISSION)
         # TODO: Explain why fill with 0. It doesn't make sense but it does the job.
         self.outcome_indices = self._match(adm_indices, self.ed_reg_indices, fill_unmatched=0)
+        print(len(self.ed_reg_indices), len(self.outcome_indices))
 
     def __getitem__(self, idx) -> tuple[th.Tensor, dict]:
         x, y = super().__getitem__(idx)

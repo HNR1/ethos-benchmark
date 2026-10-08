@@ -1,12 +1,11 @@
 name: mimic
 stages:
-  - name: remove_post_death_stays
-
-  - name: align_admissions_and_discharges
-
-  - name: remove_rows_after_death
-
-  - name: manual_fixes
+  - name: prior_adjustments
+    transforms:
+      - TableData.remove_post_death_stays
+      - TableData.align_admissions_and_discharges
+      - TableData.resolve_edstay_hadm_id
+      - TableData.manual_fixes
 
   - name: filter_codes
     params:

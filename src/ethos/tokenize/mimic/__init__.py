@@ -12,5 +12,6 @@ from .preprocessors import (
     MedicationData,
     PatientFluidOutputData,
     ProcedureData,
+    TableData,
     TransferData,
 )

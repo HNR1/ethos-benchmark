@@ -1,9 +1,522 @@
 import numpy as np
 import polars as pl
+from datetime import datetime
 
 from ...constants import SpecialToken as ST
 from ..patterns import MatchAndRevise
 from ..utils import apply_vocab_to_multitoken_codes, unify_code_names
+
+
+class TableData:
+    
+    @staticmethod
+    def remove_post_death_stays(df: pl.DataFrame) -> pl.DataFrame:
+        df = TableData._remove_stays_after_death(df, type='ED')
+        df = TableData._remove_stays_after_death(df, type='ICU')
+        df = TableData._remove_stays_after_death(df, type='HOSP')
+        return df
+
+    @staticmethod
+    def _remove_stays_after_death(df: pl.DataFrame, type: str = 'HOSP') -> pl.DataFrame:
+        if type == 'HOSP':
+            admission_code = "HOSPITAL_ADMISSION"
+            id_col = "hadm_id"
+        elif type == 'ICU':
+            admission_code = "ICU_ADMISSION"
+            id_col = "icustay_id"
+        elif type == 'ED':
+            admission_code = "ED_REGISTRATION"
+            id_col = "edstay_id"
+        else:
+            raise ValueError(f"Invalid type '{type}'. Must be 'HOSP', 'ICU' or 'ED'.")
+        
+        # Get the earliest death time for each patient
+        death_times = (
+            df.filter(pl.col("code") == "MEDS_DEATH")
+            .group_by("subject_id")
+            .agg(pl.col("time").min().alias("death_time"))
+        )
+
+        # Find admissions occurring at or after death
+        invalid_hadm_ids = (
+            df.filter(pl.col("code").str.contains(admission_code))
+            .join(death_times, on="subject_id", how="inner")
+            .filter(pl.col("time") >= pl.col("death_time"))
+            .select(["subject_id", id_col])
+            .unique()
+        )
+
+        # Remove all rows belonging to those admissions
+        return (
+            df.join(
+                invalid_hadm_ids,
+                on=["subject_id", id_col],
+                how="anti",
+            )
+            .sort(
+                ["subject_id", "time"], 
+                nulls_last=False,
+            )
+        )
+
+    @staticmethod
+    def align_admissions_and_discharges(df: pl.DataFrame) -> pl.DataFrame:
+        df = TableData._align_discharge_time_to_last_event(df, type='ED')
+        df = TableData._align_admission_time_to_first_event(df, type='ICU')
+        df = TableData._align_discharge_time_to_last_event(df, type='ICU')
+        df = TableData._align_admission_time_to_first_event(df, type='HOSP')
+        df = TableData._align_discharge_time_to_last_event(df, type='HOSP')
+        return df
+
+    @staticmethod
+    def _align_admission_time_to_first_event(df: pl.DataFrame, type: str = 'HOSP') -> pl.DataFrame:
+        if type == 'HOSP':
+            admission_code = "HOSPITAL_ADMISSION"
+            id_col = "hadm_id"
+        elif type == 'ICU':
+            admission_code = "ICU_ADMISSION"
+            id_col = "icustay_id"
+        elif type == 'ED':
+            admission_code = "ED_REGISTRATION"
+            id_col = "edstay_id"
+        else:
+            raise ValueError(f"Invalid type '{type}'. Must be 'HOSP', 'ICU' or 'ED'.")
+        
+        df = df.with_row_index("_row_id")
+
+        # Find the earliest timed event for each hospital stay
+        first_event_times = (
+            df
+            .filter(
+                pl.col(id_col).is_not_null()
+                & pl.col("time").is_not_null()
+                & ~pl.col("code").str.contains('ICD//')
+                & ~pl.col("code").str.contains('MEDICATION//')
+                & ~pl.col("code").str.contains('HCPCS//')
+                & ~pl.col("code").str.contains('TRANSFER_TO//ED//')
+                & ~pl.col("code").str.contains('ED_')
+                & ~pl.col("code").str.contains('LAB//')
+                & ~pl.col("code").str.contains('_DISCHARGE')
+            )
+            .group_by(id_col)
+            .agg(
+                pl.col("time").min().alias("first_event_time")
+            )
+        )
+
+        # Find admission events and their current times
+        admission_updates = (
+            df
+            .filter(
+                pl.col("code").str.contains(admission_code)
+                & pl.col(id_col).is_not_null()
+                & pl.col("time").is_not_null()
+            )
+            .select(
+                "_row_id",
+                id_col,
+                pl.col("time").alias("admission_time"),
+            )
+            .join(
+                first_event_times,
+                on=id_col,
+                how="left",
+            )
+            # Only move the admission if it is later than the first event of the hospital stay
+            .filter(
+                pl.col("admission_time") > pl.col("first_event_time")
+            )
+            .select(
+                "_row_id",
+                pl.col("first_event_time").alias("new_time"),
+            )
+        )
+
+        return (
+            df
+            .join(
+                admission_updates,
+                on="_row_id",
+                how="left",
+            )
+            .with_columns(
+                pl.when(pl.col("new_time").is_not_null())
+                .then(pl.col("new_time"))
+                .otherwise(pl.col("time"))
+                .alias("time")
+            )
+            .drop(["_row_id", "new_time"])
+            .sort(
+                ["subject_id", "time", "hadm_id", "icustay_id"],
+                nulls_last=False,
+            )
+            .with_row_index()
+            .drop("index")
+        )
+
+    @staticmethod
+    def _align_discharge_time_to_last_event(df: pl.DataFrame, type: str = 'HOSP') -> pl.DataFrame:
+        if type == 'HOSP':
+            discharge_code = "HOSPITAL_DISCHARGE"
+            id_col = "hadm_id"
+        elif type == 'ICU':
+            discharge_code = "ICU_DISCHARGE"
+            id_col = "icustay_id"
+        elif type == 'ED':
+            discharge_code = "ED_OUT"
+            id_col = "edstay_id"
+        else:
+            raise ValueError(f"Invalid type '{type}'. Must be 'HOSP', 'ICU' or 'ED'.")
+
+        df = df.with_row_index("_row_id")
+
+        # Find the latest timed event for each admission
+        last_event_times = (
+            df
+            .filter(
+                pl.col(id_col).is_not_null()
+                & pl.col("time").is_not_null()
+                & ~pl.col("code").str.contains('ICD//')
+                & ~pl.col("code").str.contains('MEDICATION//')
+                & ~pl.col("code").str.contains('TRANSFER_TO//')
+                & ~pl.col("code").str.contains('ED_')
+                & ~pl.col("code").str.contains('ICU_')
+                & ~pl.col("code").str.contains('HOSPITAL_DISCHARGE')
+                & ~pl.col("code").str.contains('DRG//')
+            )
+            .group_by(id_col)
+            .agg(
+                pl.col("time").max().alias("last_event_time")
+            )
+        )
+
+        # Get discharge rows and their current times
+        discharge_updates = (
+            df
+            .filter(
+                (pl.col("code").str.contains(discharge_code)
+                | pl.col("code").str.contains("DRG//")
+                | pl.col("code").str.contains("DIAGNOSIS//"))
+                & pl.col(id_col).is_not_null()
+                & pl.col("time").is_not_null()
+            )
+            .select(
+                "_row_id",
+                id_col,
+                pl.col("time").alias("discharge_time"),
+            )
+            .join(
+                last_event_times,
+                on=id_col,
+                how="left",
+            )
+            # Only update if the last event occurred after the discharge
+            .filter(
+                pl.col("last_event_time") >= pl.col("discharge_time")
+            )
+            .select(
+                "_row_id",
+                pl.col("last_event_time").alias("new_time"),
+            )
+        )
+
+        return (
+            df
+            .join(
+                discharge_updates,
+                on="_row_id",
+                how="left",
+            )
+            .with_columns(
+                pl.when(pl.col("new_time").is_not_null())
+                .then(pl.col("new_time") + pl.duration(seconds=1))
+                .otherwise(pl.col("time"))
+                .alias("time")
+            )
+            .drop(["_row_id", "new_time"])
+            .sort(
+                ["subject_id", "time", "hadm_id", "icustay_id"],
+                nulls_last=False,
+            )
+            .with_row_index()
+            .drop("index")
+        )
+    
+    @staticmethod
+    def resolve_edstay_hadm_id(df: pl.DataFrame, **kwargs) -> pl.DataFrame:
+        """
+        Ensure a one-to-one relationship between hadm_id and edstay_id
+        where both IDs are present.
+
+        ED stays without a hadm_id are left untouched.
+        Hospital stays without an edstay_id are left untouched.
+
+        For ED events with a non-null hadm_id:
+
+        - If a hadm_id has only one edstay_id, it is left unchanged.
+        - If a hadm_id has multiple edstay_ids:
+            - Keep ED_REGISTRATION events from the temporally first edstay_id.
+            - Keep ED_OUT events from the temporally last edstay_id.
+            - Remove ED_REGISTRATION events from all other edstay_ids.
+            - Remove ED_OUT events from all other edstay_ids.
+            - Assign the first edstay_id to all remaining ED events.
+
+        All other rows are preserved.
+        """
+
+        required_cols = ["hadm_id", "edstay_id", "time", "code"]
+        missing_cols = [col for col in required_cols if col not in df.columns]
+
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {', '.join(missing_cols)}")
+
+        is_ed = pl.col("edstay_id").is_not_null()
+        is_registration = pl.col("code").str.starts_with("ED_REGISTRATION")
+        is_discharge = pl.col("code").str.starts_with("ED_OUT")
+
+        # Only ED stays with a hadm_id participate in the resolution.
+        ed_df = df.filter(
+            is_ed & pl.col("hadm_id").is_not_null()
+        )
+
+        if ed_df.height == 0:
+            return df
+
+        # Find hadm_ids associated with multiple edstay_ids.
+        duplicate_hadm_ids = (
+            ed_df
+            .group_by("hadm_id")
+            .agg(
+                pl.col("edstay_id").n_unique().alias("_edstay_count")
+            )
+            .filter(pl.col("_edstay_count") > 1)
+            .select("hadm_id")
+        )
+
+        if duplicate_hadm_ids.height == 0:
+            return df
+
+        # These are guaranteed to be non-null because ed_df was restricted
+        # to rows with a non-null hadm_id.
+        duplicate_hadm_id_values = duplicate_hadm_ids["hadm_id"].to_list()
+
+        duplicate_ed = ed_df.filter(
+            pl.col("hadm_id").is_in(duplicate_hadm_id_values)
+        )
+
+        # Determine the temporal start and end of every ED stay.
+        stay_times = (
+            duplicate_ed
+            .group_by(["hadm_id", "edstay_id"])
+            .agg(
+                pl.col("time").min().alias("_start_time"),
+                pl.col("time").max().alias("_end_time"),
+            )
+        )
+
+        # Temporally first ED stay for each hadm_id.
+        first_edstay = (
+            stay_times
+            .sort(["hadm_id", "_start_time"])
+            .group_by("hadm_id", maintain_order=True)
+            .first()
+            .select([
+                "hadm_id",
+                pl.col("edstay_id").alias("_first_edstay_id"),
+            ])
+        )
+
+        # Temporally last ED stay for each hadm_id.
+        last_edstay = (
+            stay_times
+            .sort(["hadm_id", "_end_time"])
+            .group_by("hadm_id", maintain_order=True)
+            .last()
+            .select([
+                "hadm_id",
+                pl.col("edstay_id").alias("_last_edstay_id"),
+            ])
+        )
+
+        # Add the first/last stay IDs to the original dataframe.
+        #
+        # Because first_edstay/last_edstay contain only non-null hadm_ids,
+        # rows with hadm_id == null do not participate in the resolution.
+        result = (
+            df
+            .join(
+                first_edstay,
+                on="hadm_id",
+                how="left",
+            )
+            .join(
+                last_edstay,
+                on="hadm_id",
+                how="left",
+            )
+        )
+
+        # Remove:
+        #   - ED_REGISTRATION events from ED stays other than the first
+        #   - ED_OUT events from ED stays other than the last
+        #
+        # Only duplicated hadm_ids are affected.
+        result = result.filter(
+            ~(
+                is_ed
+                & pl.col("hadm_id").is_not_null()
+                & pl.col("hadm_id").is_in(duplicate_hadm_id_values)
+                & (
+                    (
+                        is_registration
+                        & (
+                            pl.col("edstay_id")
+                            != pl.col("_first_edstay_id")
+                        )
+                    )
+                    | (
+                        is_discharge
+                        & (
+                            pl.col("edstay_id")
+                            != pl.col("_last_edstay_id")
+                        )
+                    )
+                )
+            )
+        )
+
+        # Give all remaining ED events for the duplicated hadm_id
+        # the canonical (first) edstay_id.
+        result = (
+            result
+            .with_columns(
+                pl.when(
+                    is_ed
+                    & pl.col("hadm_id").is_not_null()
+                    & pl.col("hadm_id").is_in(duplicate_hadm_id_values)
+                )
+                .then(pl.col("_first_edstay_id"))
+                .otherwise(pl.col("edstay_id"))
+                .alias("edstay_id")
+            )
+            .drop(
+                "_first_edstay_id",
+                "_last_edstay_id",
+            )
+        )
+
+        return result
+
+    @staticmethod
+    def manual_fixes(df: pl.DataFrame) -> pl.DataFrame:
+        time_fixes_adm = {
+            23954106: datetime(2163,  4, 21, 1,  0, 0),
+            24523858: datetime(2129, 10, 20, 0,  0, 0),
+            26728216: datetime(2150,  4, 16, 3, 25, 0),
+            27150516: datetime(2144,  4, 30, 0, 52, 0),
+            28241666: datetime(2173,  9, 23, 0,  0, 0),
+        }
+        time_fixes_dc = {
+            20327393: datetime(2152, 12, 31,  6,  5, 38),
+            24907049: datetime(2129, 11,  2, 13, 50, 21),
+        }
+        time_fixes_dth = {
+            15996626: datetime(2177,  2, 25, 15,  1,  0),
+            10535715: datetime(2154, 12,  7,  2, 40, 21),
+        }
+
+        fixes_adm_df = pl.DataFrame({
+            "hadm_id":  list(time_fixes_adm.keys()),
+            "new_time": list(time_fixes_adm.values()),
+        })
+        fixes_dc_df = pl.DataFrame({
+            "hadm_id":  list(time_fixes_dc.keys()),
+            "new_time": list(time_fixes_dc.values()),
+        })
+        fixes_dth_df = pl.DataFrame({
+            "subject_id": list(time_fixes_dth.keys()),
+            "new_time":   list(time_fixes_dth.values()),
+        })
+
+        return (
+            df
+            # Set the time for the specific target event
+            .join(fixes_adm_df, on="hadm_id", how="left")
+            .with_columns(
+                pl.when(
+                    pl.col("new_time").is_not_null()
+                    & pl.col("code").str.contains("HOSPITAL_ADMISSION")
+                )
+                .then(pl.col("new_time"))
+                .otherwise(pl.col("time"))
+                .alias("time")
+            )
+            .drop("new_time")
+            .join(fixes_dc_df, on="hadm_id", how="left")
+            .with_columns(
+                pl.when(
+                    pl.col("new_time").is_not_null()
+                    & (pl.col("code").str.contains("HOSPITAL_DISCHARGE")
+                    | pl.col("code").str.contains("DRG//")
+                    | pl.col("code").str.contains("DIAGNOSIS//"))
+                )
+                .then(pl.col("new_time"))
+                .otherwise(pl.col("time"))
+                .alias("time")
+            )
+            .drop("new_time")
+            .join(fixes_dth_df, on="subject_id", how="left")
+            .with_columns(
+                pl.when(
+                    pl.col("new_time").is_not_null()
+                    & pl.col("code").str.contains("MEDS_DEATH")
+                )
+                .then(pl.col("new_time"))
+                .otherwise(pl.col("time"))
+                .alias("time")
+            )
+            .drop("new_time")
+            # Temporary key to control ordering of events at the same timestamp
+            .with_columns(
+                pl.when(pl.col("code").str.contains("HOSPITAL_DISCHARGE"))
+                .then(0)
+                .when(pl.col("code").str.contains("ED_REGISTRATION"))
+                .then(1)
+                .when(pl.col("code").str.contains("HOSPITAL_ADMISSION"))
+                .then(2)
+                .when(pl.col("code").str.contains("ICU_ADMISSION"))
+                .then(3)
+                .when(pl.col("code").str.contains("ED_OUT"))
+                .then(4)
+                .otherwise(0)
+                .alias("_event_order_1")
+            )
+            .with_columns(
+                pl.when(pl.col("code").str.contains("_DISCHARGE"))
+                .then(0)
+                .when(pl.col("code").str.contains("DIAGNOSIS//"))
+                .then(1)
+                .when(pl.col("code").str.contains("DRG//"))
+                .then(2)
+                .otherwise(0)
+                .alias("_event_order_2")
+            )
+            # Sort discharge before admission when subject_id + time are equal
+            .sort(
+                [
+                    "subject_id",
+                    "time",
+                    "_event_order_1",
+                    "hadm_id",
+                    "icustay_id",
+                    "_event_order_2"
+                ],
+                nulls_last=False,
+            )
+            .drop("_event_order_1", "_event_order_2")
+            .with_row_index()
+            .drop("index")
+        )
 
 
 class DeathData:

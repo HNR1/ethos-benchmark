@@ -9,7 +9,7 @@ from safetensors import safe_open
 
 class ShardedData:
     def __init__(self, data_fp: Path):
-        # shard_fps = sorted(data_fp.glob("[2]*.safetensors"))
+        # shard_fps = sorted(data_fp.glob("[1]*.safetensors"))
         shard_fps = sorted(data_fp.glob("[0-9]*.safetensors"))
         if not shard_fps:
             raise FileNotFoundError(f"No files matching '[0-9]*.safetensors' found in: {data_fp}")
