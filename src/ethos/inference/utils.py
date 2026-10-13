@@ -19,6 +19,7 @@ from ..datasets import (
     ICUReadmissionDataset,
     ReadmissionDataset,
     SofaPredictionDataset,
+    LosPredictionDataset
 )
 from ..datasets.base import InferenceDataset
 from ..datasets.extensions import create_single_trajectory_dataset
@@ -56,6 +57,8 @@ def get_dataset_cls(task: Task) -> type[InferenceDataset]:
             return CriticalOutcomeAtTriageDataset
         case Task.ED_REPRESENTATION:
             return EdReattendenceDataset
+        case Task.LOS_PREDICTION:
+            return LosPredictionDataset
         case _:
             raise ValueError(f"Unknown task: {task}, available are {', '.join(Task)}")
 

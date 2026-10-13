@@ -24,7 +24,6 @@ class HospitalMortalityBase(InferenceDataset, abc.ABC):
         dc_indices  = self._get_indices_of_stokens(dc_stoken)
         dth_indices = self._get_indices_of_stokens(ST.DEATH)
         disc_b4_adm = dc_indices <= adm_indices
-        print(len(adm_indices), "admissions,", len(dc_indices), "discharges,", len(dth_indices), "deaths found.")
         adm_indices = adm_indices[~disc_b4_adm]
         dc_indices  = dc_indices[~disc_b4_adm]
 

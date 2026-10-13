@@ -20,6 +20,8 @@ class Task(StrEnum):
     ED_CRITICAL_OUTCOME = "ed_critical_outcome"
     # the one below is called "ED reattendance" in the ED-Benchmark paper
     ED_REPRESENTATION = "ed_representation"
+    
+    LOS_PREDICTION = "los_prediction"
 
 
 class Reason(StrEnum):

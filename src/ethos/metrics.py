@@ -365,6 +365,14 @@ def compute_and_print_metrics(y_true, y_pred, figure_title: str, **kwargs) -> di
     return basic_res | fitted_res
 
 
+def compute_and_print_metrics_regression(y_true, y_pred, **kwargs) -> dict:
+    # calc mae between y_true and y_pred
+    mae = np.mean(np.abs(y_true - y_pred))
+    res = {"mae": mae}
+    print(f"MAE: {mae:.4f}")
+    return res
+
+
 def plot_calibration_curve(y_true, y_pred, n_bins: int = 10):
     """Plots the calibration curve for given true labels and predicted probabilities.
 
