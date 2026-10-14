@@ -241,36 +241,33 @@ class InferenceDataset(TimelineDataset, abc.ABC):
 
         return th.cat(shard_indices)
 
-    def _get_indices_of_stokens_with_offset(self, stokens: str | Sequence[str], time_offset: timedelta | None = None) -> th.Tensor:
-        indices = self._get_indices_of_stokens(stokens)
-        if time_offset is None or time_offset == timedelta():
-            return indices
+    def _get_indices_of_stokens_with_offset(
+        self,
+        stokens: str | Sequence[str],
+        offset: timedelta,
+    ) -> th.Tensor:
+        """For every occurrence of `stokens` (e.g. admission), return the global index
+        of the last event that happened at most `offset` after it
+        (inclusive), within the same timeline."""
+        if isinstance(stokens, str):
+            stokens = [stokens]
+        tokens_of_interest = th.tensor(self.vocab.encode(stokens))
 
-        offset_us = time_offset.total_seconds() * 1e6
-        final_indices = []
+        result = []
         token_offset = 0
+        for token_chunk, time_chunk in zip(self.tokens, self.times):
+            start_idx = th.nonzero(th.isin(token_chunk, tokens_of_interest)).view(-1)
+            if len(start_idx) > 0:
+                deadline = time_chunk[start_idx] + offset.total_seconds() * 1e6
+                # right=True -> first position with time > deadline; minus 1 -> last time <= deadline
+                end_idx = th.searchsorted(time_chunk, deadline, right=True) - 1
+                result.append(end_idx + token_offset)
+            token_offset += len(token_chunk)
 
-        for tokens, times in zip(self.tokens, self.times):
-            start = th.searchsorted(indices, token_offset)
-            end = th.searchsorted(indices, token_offset + len(tokens))
-            matches = indices[start:end] - token_offset
-
-            if matches.numel():
-                positions = th.arange(len(tokens), device=tokens.device)
-                within_window = (
-                    (positions[None, :] >= matches[:, None])
-                    & (times[None, :] <= times[matches, None] + offset_us)
-                    & (times[None, :] >= times[matches, None])
-                )
-                last_positions = th.where(
-                    within_window, positions[None, :], -1
-                ).max(dim=1).values
-                final_indices.append(last_positions + token_offset)
-
-            token_offset += len(tokens)
-
-        return th.cat(final_indices) if final_indices else indices[:0]
-
+        if not result:
+            return th.empty(0, dtype=th.long)
+        return th.cat(result)
+    
     def _match(
         self,
         ordered_sequence: th.Tensor,

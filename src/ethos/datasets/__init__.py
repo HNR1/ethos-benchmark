@@ -13,3 +13,4 @@ from .mimic_icu import (
     SofaPredictionDataset,
 )
 from .readmission import ReadmissionDataset
+from .length_of_stay import LosPredictionDataset
