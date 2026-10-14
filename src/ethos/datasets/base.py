@@ -258,11 +258,13 @@ class InferenceDataset(TimelineDataset, abc.ABC):
         for token_chunk, time_chunk in zip(self.tokens, self.times):
             start_idx = th.nonzero(th.isin(token_chunk, tokens_of_interest)).view(-1)
             if len(start_idx) > 0:
-                deadline = time_chunk[start_idx] + offset.total_seconds() * 1e6
+                deadline = time_chunk[start_idx] // 1_000_000 + int(offset.total_seconds())
                 # right=True -> first position with time > deadline; minus 1 -> last time <= deadline
-                end_idx = th.searchsorted(time_chunk, deadline, right=True) - 1
+                end_idx = th.searchsorted(time_chunk // 1_000_000, deadline, right=True) - 1
                 result.append(end_idx + token_offset)
             token_offset += len(token_chunk)
+            print(start_idx, result[-1])
+            raise ValueError("DEBUG")
 
         if not result:
             return th.empty(0, dtype=th.long)
