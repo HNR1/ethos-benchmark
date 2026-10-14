@@ -5,15 +5,16 @@
 #SBATCH --gres=gpu:8
 #SBATCH --output=ethos_infer.log
 
-export CUDA_VISIBLE_DEVICES="2"
+export CUDA_VISIBLE_DEVICES="3"
 # this script is intended to be run from the project root
-model_variant="recent_model.pt"
+model_variant="best_model.pt"
 
 dataset=${1//-/_}
 task_name=$2
 shift 2
 
-dataset_dir="../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized"
+dataset_dir="data/mimic-tokenized"
+# dataset_dir="../../../mnt/data_share/project_henri/ethos-ares/mimic-tokenized"
 
 case $dataset in
 mimic*)
@@ -24,7 +25,6 @@ mimic*)
     exit 1
     ;;
 esac
-# dataset_dir="data/tokenized_datasets/$dataset"
 
 clear
 if [[ ! -d $dataset_dir ]]; then
@@ -33,7 +33,7 @@ if [[ ! -d $dataset_dir ]]; then
 fi
 
 res_name_prefix=""
-rep_num=1
+rep_num=20
 for arg in "$@"; do
     if [[ $arg == res_name_prefix=* ]]; then
         res_name_prefix="${arg#res_name_prefix=}_"
@@ -74,7 +74,7 @@ ethos_infer \
     output_fn=${res_name_prefix}rep_size_${rep_num}_\$(date +%Y-%m-%d_%H-%M-%S) \
     $* \
     n_gpus=1 \
-    rep_num=1
+    rep_num=${rep_num} \
 "
 
 module load singularity 2>/dev/null

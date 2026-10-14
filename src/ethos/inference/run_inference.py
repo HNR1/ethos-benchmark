@@ -11,7 +11,7 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 
 from .constants import Task
-from .inference import get_dataset_cls, spawn_inference_worker
+from .inference import get_dataset_cls, spawn_inference_worker, spawn_inference_worker_new
 from .utils import evaluate_dataset_subset, format_big_number, producer, write_results_to_parquet
 
 
@@ -90,7 +90,7 @@ def main(cfg: DictConfig):
         processes = [Process(target=producer, args=(subsets, job_queue, num_proc), name="producer")]
         processes.extend(
             Process(
-                target=spawn_inference_worker,
+                target=spawn_inference_worker_new,
                 args=(
                     job_queue,
                     cfg.model_fp,
