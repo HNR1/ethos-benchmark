@@ -8,7 +8,7 @@ from ..constants import SpecialToken as ST
 from ..utils import load_model_checkpoint, setup_torch
 from ..vocabulary import Vocabulary
 from .constants import Reason, Task
-from .utils import create_loader, get_dataset_cls, get_next_token, get_token_time
+from .utils import create_loader, get_dataset_cls, get_next_token, get_next_token_cached, get_token_time
 
 
 def spawn_inference_worker(
@@ -147,3 +147,173 @@ def spawn_inference_worker(
             gen_times = gen_times[not_completed_mask]
             if generated_tokens is not None:
                 generated_tokens = [tokens[not_completed_mask, :] for tokens in generated_tokens]
+
+
+def spawn_inference_worker_new(
+    job_queue: Queue,
+    model_fp: str | Path,
+    task: Task,
+    dataset_kwargs: dict,
+    progress_queue: Queue,
+    temperature: float = 1.0,
+    rep_num: int = 1,
+    device: str = "cuda",
+    no_compile: bool = False,
+    save_generated_tokens: bool = False,
+):
+    if "cuda" in device:
+        th.cuda.set_device(device)
+        th.set_float32_matmul_precision("high")
+    autocast_context = setup_torch(device, dtype="bfloat16" if "cuda" in device else "float32")
+
+    model, _ = load_model_checkpoint(model_fp, map_location=device)
+    model.to(device)
+    # The KV cache changes shape every step, which can trigger recompiles.
+    # Benchmark with no_compile=True first.
+    model = th.compile(model, disable=no_compile)
+
+    dataset_cls = get_dataset_cls(task)
+    dataset = dataset_cls(**dataset_kwargs)
+
+    max_timeline_size = dataset_kwargs["n_positions"]
+    ctx_size = dataset.context_size
+    vocab: Vocabulary = dataset.vocab
+
+    data_loader = create_loader(job_queue, dataset)
+
+    stop_stokens = dataset.stop_stokens
+    stop_tokens = th.tensor(vocab.encode(stop_stokens), dtype=th.long)
+
+    time_limit = th.tensor(dataset.time_limit.total_seconds() * 1e6)
+
+    for timeline, ground_truth in data_loader:
+        ctx = None
+        if isinstance(timeline, tuple):
+            ctx, timeline = tuple(t.to(device, non_blocking=True) for t in timeline)
+            ctx = ctx.repeat(rep_num, 1)
+        else:
+            timeline = timeline.to(device, non_blocking=True)
+        timeline = timeline.repeat(rep_num, 1)
+
+        gen_token_num, offset = 0, 0
+        gen_times = th.zeros(rep_num, dtype=th.float64)
+        generated_tokens = [] if save_generated_tokens else None
+
+        # KV-cache state (reset for every new timeline)
+        past, enc, cached_len = None, None, 0
+
+        while timeline.size(0):
+            if task == Task.SOFA_PREDICTION and gen_token_num == 1:
+                # injected token, no forward pass -> cached_len deliberately unchanged,
+                # so the next real call feeds [generated token, SOFA token]
+                next_token = th.tensor(
+                    [vocab.encode([ST.SOFA])], device=timeline.device, dtype=th.long
+                )
+                next_token = next_token.repeat(timeline.size(0), 1)
+            else:
+                # Once the window is full the oldest token gets dropped, positions shift
+                # and cached keys/values become invalid -> no cache from here on.
+                use_cache = timeline.size(1) < max_timeline_size
+                if not use_cache:
+                    past, cached_len = None, 0
+
+                with autocast_context:
+                    next_token, probs, past, enc = get_next_token_cached(
+                        model,
+                        timeline[:, cached_len:],
+                        ctx=ctx,
+                        past=past,
+                        enc=enc,
+                        use_cache=use_cache,
+                        temperature=temperature,
+                    )
+                cached_len = timeline.size(1) if use_cache else 0
+
+            if generated_tokens is not None:
+                generated_tokens.append(next_token)
+
+            if not offset and timeline.size(1) == max_timeline_size:
+                offset = 1
+
+            if ctx is not None:
+                new_timeline = (timeline[:, offset:], next_token)
+            else:
+                new_timeline = (
+                    timeline[:, :ctx_size],
+                    timeline[:, ctx_size + offset :],
+                    next_token,
+                )
+            timeline = th.cat(new_timeline, dim=1)
+
+            gen_token_num += 1
+
+            new_token = next_token.cpu().view(-1)
+            gen_times += get_token_time(new_token, vocab)
+
+            completed_this_iter = th.isin(new_token, stop_tokens) | (gen_times > time_limit)
+
+            if (task == Task.DRG_PREDICTION) or (
+                task == Task.SOFA_PREDICTION and gen_token_num == 3
+            ):
+                completed_this_iter[:] = True
+
+            if not completed_this_iter.any():
+                continue
+
+            for i in th.nonzero(completed_this_iter):
+                stop_reason = Reason.GOT_TOKEN
+                actual_token = next_token[i].item()
+
+                token_time = gen_times[i]
+                if token_time > time_limit:
+                    stop_reason = Reason.TIME_LIMIT
+
+                if th.isinf(token_time):
+                    actual_stoken = str(actual_token)
+                    stop_reason = Reason.KEY_ERROR
+                    token_time = None
+                else:
+                    actual_stoken = vocab.decode(actual_token)
+                    token_time = round(token_time.item())
+
+                gt = copy(ground_truth)
+
+                results = {
+                    "expected": gt.pop("expected"),
+                    "actual": actual_stoken,
+                    "stop_reason": stop_reason,
+                    "actual_prob": probs[i, actual_token].item(),
+                    **dict(zip(stop_stokens, probs[i, stop_tokens].tolist())),
+                    "true_token_time": gt.pop("true_token_time"),
+                    "token_time": token_time,
+                    "true_token_dist": gt.pop("true_token_dist"),
+                    "token_dist": gen_token_num,
+                    **gt,
+                }
+
+                if generated_tokens is not None:
+                    results["generated_tokens"] = [tokens[i].item() for tokens in generated_tokens]
+
+                progress_queue.put(results)
+
+            if completed_this_iter.all():
+                break
+
+            not_completed_mask = ~completed_this_iter
+            keep = not_completed_mask.to(timeline.device)
+
+            timeline = timeline[keep, :]
+            gen_times = gen_times[not_completed_mask]
+            if generated_tokens is not None:
+                generated_tokens = [tokens[keep, :] for tokens in generated_tokens]
+
+            # shrink everything that is batch-aligned with the same mask
+            if ctx is not None:
+                ctx = ctx[keep]           # (also fixes a ctx/timeline batch mismatch)
+                if enc is not None:
+                    enc = enc[keep]
+            if past is not None:
+                idx = th.nonzero(keep).squeeze(1)
+                past.batch_select_indices(idx)   # DynamicCache, in place
+                # legacy tuple cache instead:
+                # past = tuple(tuple(t[idx] for t in layer) for layer in past)
