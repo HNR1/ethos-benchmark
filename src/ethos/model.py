@@ -9,6 +9,7 @@ from torch.nn import functional as F
 from transformers import GPT2Config
 
 ModelOutput = namedtuple("ModelOutput", ["loss", "logits"])
+ModelOutputNew = namedtuple("ModelOutput", ["loss", "logits", "past_kv"], defaults=[None])
 
 
 class CausalSelfAttention(nn.Module):
@@ -74,6 +75,59 @@ class CausalSelfAttention(nn.Module):
         return y
 
 
+class CausalSelfAttentionNew(nn.Module):
+    def __init__(self, config, attention_weights: list | None = None):
+        super().__init__()
+        assert config.n_embd % config.n_head == 0
+        # key, query, value projections for all heads, but in a batch
+        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
+        # output projection
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        # regularization
+        self.attn_dropout = nn.Dropout(config.attn_pdrop)
+        self.resid_dropout = nn.Dropout(config.resid_pdrop)
+        self.n_head = config.n_head
+        self.n_embd = config.n_embd
+        self.dropout = config.attn_pdrop
+        self.flash = hasattr(torch.nn.functional, "scaled_dot_product_attention")
+        if not self.flash or attention_weights is not None:
+            print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
+            self.register_buffer(
+                "bias",
+                torch.tril(torch.ones(config.n_positions, config.n_positions)).view(
+                    1, 1, config.n_positions, config.n_positions
+                ),
+                persistent=False,
+            )
+        self.attention_weights = attention_weights
+ 
+    def forward(self, x, past=None, use_cache=False):
+        B, T, C = x.size()
+        q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
+        hs = C // self.n_head
+        q = q.view(B, T, self.n_head, hs).transpose(1, 2)   # (B, nh, T, hs)
+        k = k.view(B, T, self.n_head, hs).transpose(1, 2)
+        v = v.view(B, T, self.n_head, hs).transpose(1, 2)
+ 
+        if past is not None:
+            past_len = past[0].size(2)
+            k = torch.cat([past[0], k], dim=2)                  # (B, nh, past+T, hs)
+            v = torch.cat([past[1], v], dim=2)
+            # new token i may see all cached tokens plus new tokens <= i
+            # (works for T == 1 and for T > 1, e.g. the injected SOFA step)
+            mask = torch.ones(T, k.size(2), dtype=torch.bool, device=x.device).tril(diagonal=past_len)
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        else:
+            y = F.scaled_dot_product_attention(
+                q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0.0
+            )
+ 
+        present = (k, v) if use_cache else None
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
+        y = self.resid_dropout(self.c_proj(y))
+        return y, present
+
+
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -102,6 +156,22 @@ class Block(nn.Module):
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         return x
+
+
+class BlockNew(nn.Module):
+    def __init__(self, config, attention_weights: list | None = None):
+        super().__init__()
+        self.ln_1 = nn.LayerNorm(config.n_embd, bias=config.bias)
+        self.attn = CausalSelfAttentionNew(config, attention_weights=attention_weights)
+        self.ln_2 = nn.LayerNorm(config.n_embd, bias=config.bias)
+        self.mlp = MLP(config)
+    
+    def forward(self, x, past=None, use_cache=False):
+        a, present = self.attn(self.ln_1(x), past, use_cache)
+        x = x + a
+        x = x + self.mlp(self.ln_2(x))
+        # keep the old return type for training / non-cached callers
+        return (x, present) if use_cache else x
 
 
 class GPT2LMNoBiasModel(nn.Module):
@@ -175,6 +245,100 @@ class GPT2LMNoBiasModel(nn.Module):
             loss = None
 
         return ModelOutput(loss=loss, logits=logits)
+
+    @torch.no_grad()
+    def get_next_token(self, x: torch.Tensor, return_probs: bool = False, top_k: int | None = None):
+        logits = self(x).logits
+        logits = logits[:, -1, :]
+        if top_k is not None:
+            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+            logits[logits < v[:, [-1]]] = -float("Inf")
+        probs = F.softmax(logits, dim=-1)
+        next_token = torch.multinomial(probs, num_samples=1)
+        if return_probs:
+            return next_token, probs
+        return next_token
+
+
+class GPT2LMNoBiasModelNew(nn.Module):
+    def __init__(
+        self,
+        config: GPT2Config,
+        return_attention=False,
+    ):
+        super().__init__()
+        self.config = config
+
+        self.return_attention = return_attention
+        self.attention_weights = [] if return_attention else None
+
+        self.transformer = nn.ModuleDict(
+            dict(
+                wte=nn.Embedding(config.vocab_size, config.n_embd),
+                wpe=nn.Embedding(config.n_positions, config.n_embd),
+                drop=nn.Dropout(config.embd_pdrop),
+                h=nn.ModuleList(
+                    [BlockNew(config, self.attention_weights) for _ in range(config.n_layer)]
+                ),
+                ln_f=nn.LayerNorm(config.n_embd, bias=config.bias),
+            )
+        )
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.transformer.wte.weight = self.lm_head.weight
+
+        # init all weights
+        self.apply(self._init_weights)
+        for pn, p in self.named_parameters():
+            if pn.endswith("c_proj.weight"):
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer))
+
+        pos = torch.arange(0, config.n_positions, dtype=torch.long)
+        self.register_buffer("pos", pos, persistent=False)
+
+    @staticmethod
+    def _init_weights(module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    @lru_cache
+    def num_parameters(self, exclude_embeddings=True):
+        n_params = sum(p.numel() for p in self.parameters())
+        if exclude_embeddings:
+            n_params -= self.transformer.wpe.weight.numel()
+        return n_params
+
+    def forward(self, input_ids, labels=None, past_kv=None, use_cache=False) -> ModelOutputNew:
+        _, t = input_ids.size()
+        if self.return_attention:
+            self.attention_weights.clear()   # note: attention weights aren't collected in the cached path
+    
+        past_len = past_kv[0][0].size(2) if past_kv is not None else 0
+    
+        tok_emb = self.transformer.wte(input_ids)
+        pos_emb = self.transformer.wpe(self.pos[past_len : past_len + t])   # <- offset by cache length
+        x = self.transformer.drop(tok_emb + pos_emb)
+    
+        presents = [] if use_cache else None
+        for i, block in enumerate(self.transformer.h):
+            if use_cache:
+                x, present = block(x, past_kv[i] if past_kv is not None else None, True)
+                presents.append(present)
+            else:
+                x = block(x)
+        x = self.transformer.ln_f(x)
+    
+        if labels is not None:
+            logits = self.lm_head(x)
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1))
+        else:
+            logits = self.lm_head(x[:, [-1], :])
+            loss = None
+    
+        return ModelOutputNew(loss=loss, logits=logits, past_kv=presents)
 
     @torch.no_grad()
     def get_next_token(self, x: torch.Tensor, return_probs: bool = False, top_k: int | None = None):

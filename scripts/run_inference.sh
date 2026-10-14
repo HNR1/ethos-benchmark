@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:8
 #SBATCH --output=ethos_infer.log
 
-export CUDA_VISIBLE_DEVICES="3"
+export CUDA_VISIBLE_DEVICES="0"
 # this script is intended to be run from the project root
 model_variant="best_model.pt"
 
@@ -74,7 +74,7 @@ ethos_infer \
     output_fn=${res_name_prefix}rep_size_${rep_num}_\$(date +%Y-%m-%d_%H-%M-%S) \
     $* \
     n_gpus=1 \
-    rep_num=${rep_num} \
+    rep_num=${rep_num} 
 "
 
 module load singularity 2>/dev/null

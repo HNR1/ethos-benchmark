@@ -200,7 +200,7 @@ def spawn_inference_worker_new(
         generated_tokens = [] if save_generated_tokens else None
 
         # KV-cache state (reset for every new timeline)
-        past, enc, cached_len = None, None, 0
+        past, cached_len = None, 0
 
         while timeline.size(0):
             if task == Task.SOFA_PREDICTION and gen_token_num == 1:
@@ -216,18 +216,13 @@ def spawn_inference_worker_new(
                 use_cache = timeline.size(1) < max_timeline_size
                 if not use_cache:
                     past, cached_len = None, 0
-
                 with autocast_context:
-                    next_token, probs, past, enc = get_next_token_cached(
-                        model,
-                        timeline[:, cached_len:],
-                        ctx=ctx,
-                        past=past,
-                        enc=enc,
-                        use_cache=use_cache,
-                        temperature=temperature,
+                    next_token, probs, past = get_next_token_cached(
+                        model, timeline[:, cached_len:], past=past,
+                        use_cache=use_cache, temperature=temperature,
                     )
                 cached_len = timeline.size(1) if use_cache else 0
+
 
             if generated_tokens is not None:
                 generated_tokens.append(next_token)
@@ -303,6 +298,8 @@ def spawn_inference_worker_new(
             keep = not_completed_mask.to(timeline.device)
 
             timeline = timeline[keep, :]
+            if past is not None:
+                pFast = [(k[keep], v[keep]) for k, v in past]
             gen_times = gen_times[not_completed_mask]
             if generated_tokens is not None:
                 generated_tokens = [tokens[keep, :] for tokens in generated_tokens]
@@ -313,7 +310,4 @@ def spawn_inference_worker_new(
                 if enc is not None:
                     enc = enc[keep]
             if past is not None:
-                idx = th.nonzero(keep).squeeze(1)
-                past.batch_select_indices(idx)   # DynamicCache, in place
-                # legacy tuple cache instead:
-                # past = tuple(tuple(t[idx] for t in layer) for layer in past)
+                past = [(k[keep], v[keep]) for k, v in past]

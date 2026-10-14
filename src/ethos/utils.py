@@ -7,7 +7,7 @@ import torch as th
 from transformers import EncoderDecoderModel
 
 from .constants import MAPPINGS_DIR
-from .model import GPT2LMNoBiasModel
+from .model import GPT2LMNoBiasModel, GPT2LMNoBiasModelNew
 
 
 def setup_torch(device, dtype, seed=42):
@@ -30,14 +30,14 @@ def setup_torch(device, dtype, seed=42):
 
 
 def load_model_checkpoint(checkpoint_fp: str | Path, **kwargs) -> tuple[
-    GPT2LMNoBiasModel | EncoderDecoderModel, dict]:
+    GPT2LMNoBiasModelNew | EncoderDecoderModel, dict]:
     """Load model from a checkpoint file, **kwargs are passed to `torch.load`."""
     checkpoint = th.load(checkpoint_fp, weights_only=False, **kwargs)
 
     if checkpoint["model_config"].is_encoder_decoder:
         model = EncoderDecoderModel(checkpoint["model_config"])
     else:
-        model = GPT2LMNoBiasModel(checkpoint["model_config"])
+        model = GPT2LMNoBiasModelNew(checkpoint["model_config"])
 
     model.load_state_dict(checkpoint["model"])
 

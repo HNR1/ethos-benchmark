@@ -145,40 +145,15 @@ def get_next_token(
 
 
 @th.inference_mode()
-def get_next_token_cached(
-    model,
-    x: th.Tensor,                    # ONLY the tokens the cache has not seen yet
-    ctx: th.Tensor | None = None,    # encoder input (encoder-decoder models only)
-    past=None,                       # decoder KV cache (DynamicCache) or None
-    enc: th.Tensor | None = None,    # cached encoder output, or None
-    use_cache: bool = True,
-    top_k: int | None = None,
-    temperature: float = 1.0,
-):
-    if ctx is not None:
-        if enc is None:
-            out = model(ctx, decoder_input_ids=x, past_key_values=past, use_cache=use_cache)
-        else:
-            # encoder already ran: skip re-encoding ctx
-            out = model(
-                encoder_outputs=(enc,),
-                decoder_input_ids=x,
-                past_key_values=past,
-                use_cache=use_cache,
-            )
-        enc = out.encoder_last_hidden_state
-    else:
-        out = model(x, past_key_values=past, use_cache=use_cache)
- 
+def get_next_token_cached(model, x, past=None, use_cache=True, top_k=None, temperature=1.0):
+    out = model(x, past_kv=past, use_cache=use_cache)
     logits = out.logits[:, -1, :] / temperature
     if top_k is not None:
         v, _ = th.topk(logits, min(top_k, logits.size(-1)))
         logits[logits < v[:, [-1]]] = -float("Inf")
- 
     probs = F.softmax(logits, dim=-1)
     next_token = th.multinomial(probs, num_samples=1)
-    return next_token, probs, (out.past_key_values if use_cache else None), enc
-
+    return next_token, probs, out.past_kv
 
 
 def format_big_number(num: int) -> str:
