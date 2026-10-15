@@ -27,6 +27,7 @@ dependencies = [
     "loguru",
     "matplotlib>=3.11.1",
     "meds_transforms==0.1.1",
+    "numba>=0.68.0",
     "numpy",
     "pandas>=3.0.5",
     "polars  >= 1.26.0, <= 1.27.9",

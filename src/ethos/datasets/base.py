@@ -3,6 +3,8 @@ import pickle
 from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
+import numpy as np
+from numba import njit
 
 import polars as pl
 import torch as th
@@ -200,6 +202,18 @@ class TimelineDataset(th.utils.data.Dataset):
 
         return train_dataset, test_dataset
 
+@njit(cache=True)
+def last_idx_within_window(times, starts, window):
+    out = np.empty(len(starts), dtype=np.int64)
+    n = len(times)
+    for k in range(len(starts)):
+        s = starts[k]
+        deadline = times[s] + window
+        j = s + 1
+        while j < n and times[j] <= deadline:
+            j += 1
+        out[k] = j - 1  # last index whose time is still <= deadline
+    return out
 
 class InferenceDataset(TimelineDataset, abc.ABC):
     # INFERENCE DEFAULT CONSTRAINTS
@@ -240,35 +254,33 @@ class InferenceDataset(TimelineDataset, abc.ABC):
             token_offset += len(token_chunk)
 
         return th.cat(shard_indices)
+    
 
     def _get_indices_of_stokens_with_offset(
         self,
         stokens: str | Sequence[str],
         offset: timedelta,
     ) -> th.Tensor:
-        """For every occurrence of `stokens` (e.g. admission), return the global index
-        of the last event that happened at most `offset` after it
-        (inclusive), within the same timeline."""
         if isinstance(stokens, str):
             stokens = [stokens]
-        tokens_of_interest = th.tensor(self.vocab.encode(stokens))
+        tokens_of_interest = np.asarray(self.vocab.encode(stokens))
 
         result = []
         token_offset = 0
         for token_chunk, time_chunk in zip(self.tokens, self.times):
-            start_idx = th.nonzero(th.isin(token_chunk, tokens_of_interest)).view(-1)
-            if len(start_idx) > 0:
-                deadline = time_chunk[start_idx] // 1_000_000 + int(offset.total_seconds())
-                # right=True -> first position with time > deadline; minus 1 -> last time <= deadline
-                end_idx = th.searchsorted(time_chunk // 1_000_000, deadline, right=True) - 1
-                result.append(end_idx + token_offset)
-            token_offset += len(token_chunk)
-            print(start_idx, result[-1])
-            raise ValueError("DEBUG")
+            time_chunk = time_chunk // 1_000_000  # Convert to seconds
+            tokens_np = np.asarray(token_chunk)
+            times_np = np.asarray(time_chunk)
+            starts = np.flatnonzero(np.isin(tokens_np, tokens_of_interest))
+            if len(starts) > 0:
+                window_seconds = int(offset.total_seconds())
+                ends = last_idx_within_window(times_np, starts, window_seconds)
+                result.append(ends + token_offset)
+            token_offset += len(tokens_np)
 
         if not result:
             return th.empty(0, dtype=th.long)
-        return th.cat(result)
+        return th.from_numpy(np.concatenate(result))
     
     def _match(
         self,

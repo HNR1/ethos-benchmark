@@ -23,7 +23,6 @@ class LosPredictionDataset(InferenceDataset, abc.ABC):
         adm_indices = self._get_indices_of_stokens(ST.ICU_ADMISSION)
         start_indices = self._get_indices_of_stokens_with_offset(ST.ICU_ADMISSION, self.offset)
         assert (start_indices >= 0).all(), f"Found no start indices for offset {self.offset}."
-        print(adm_indices[:3], list(sorted(start_indices))[:3])
         # print(len(adm_indices), adm_indices[0].item())
         dc_indices  = self._get_indices_of_stokens(ST.ICU_DISCHARGE)
         dth_indices = self._get_indices_of_stokens(ST.DEATH)
