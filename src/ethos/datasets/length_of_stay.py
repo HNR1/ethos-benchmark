@@ -23,13 +23,19 @@ class LosPredictionDataset(InferenceDataset, abc.ABC):
         adm_indices = self._get_indices_of_stokens(ST.ICU_ADMISSION)
         start_indices = self._get_indices_of_stokens_with_offset(ST.ICU_ADMISSION, self.offset)
         assert (start_indices >= 0).all(), f"Found no start indices for offset {self.offset}."
-        # print(len(adm_indices), adm_indices[0].item())
         dc_indices  = self._get_indices_of_stokens(ST.ICU_DISCHARGE)
         dth_indices = self._get_indices_of_stokens(ST.DEATH)
+        
         dc_b4_start = dc_indices <= start_indices
-        adm_indices = adm_indices[~dc_b4_start]
-        start_indices = start_indices[~dc_b4_start]
-        dc_indices  = dc_indices[~dc_b4_start]
+        dth_b4_start = death_b4_disc = (
+            (dth_indices[:, None] > adm_indices[None, :]) &
+            (dth_indices[:, None] <= start_indices[None, :])
+        ).any(dim=0)
+        valid_indices = ~(dc_b4_start | dth_b4_start)
+        
+        adm_indices = adm_indices[valid_indices]
+        start_indices = start_indices[valid_indices]
+        dc_indices  = dc_indices[valid_indices]
         dc_or_dth_indices = th.tensor(list(sorted(set(dc_indices).union(set(dth_indices)))))
 
         self.adm_indices = adm_indices
