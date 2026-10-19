@@ -12,6 +12,7 @@ from scipy.optimize import minimize
 from scipy.stats import norm
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import precision_recall_curve, roc_auc_score, roc_curve
+from datetime import timedelta
 
 from .inference.constants import Reason
 
@@ -365,11 +366,14 @@ def compute_and_print_metrics(y_true, y_pred, figure_title: str, **kwargs) -> di
     return basic_res | fitted_res
 
 
-def compute_and_print_metrics_regression(y_true, y_pred, **kwargs) -> dict:
+def compute_and_print_metrics_regression(y_true, y_pred, counts: int) -> dict:
     # calc mae between y_true and y_pred
-    mae = np.mean(np.abs(y_true - y_pred))
-    res = {"mae": mae}
-    print(f"MAE: {mae:.4f}")
+    true = np.asarray([y.total_seconds() for y in y_true])
+    pred = np.asarray([y.total_seconds() for y in y_pred])
+    mae = np.mean(np.abs(true - pred))
+    mae_td = timedelta(seconds=mae)
+    res = {"mae": mae_td}
+    print(f"MAE: {mae_td} for {len(y_true)*counts} samples")
     return res
 
 
