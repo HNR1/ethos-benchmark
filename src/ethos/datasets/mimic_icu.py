@@ -59,6 +59,7 @@ class SofaPredictionDataset(InferenceDataset):
         return super().__getitem__(icu_adm_idx), {
             "expected": self.vocab.decode(sofa_token),
             "true_token_dist": 3,
+            "true_token_time": 0,
             "icu_stay_id": self._get_icu_stay_id(icu_adm_idx),
             "patient_id": self.patient_id_at_idx[icu_adm_idx].item(),
             "data_idx": icu_adm_idx.item(),

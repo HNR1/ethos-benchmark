@@ -53,7 +53,7 @@ class LosPredictionDataset(InferenceDataset, abc.ABC):
         start_idx = self.start_indices[idx]
         outcome_idx = self.outcome_indices[idx]
         y = {
-            # "expected": self.vocab.decode(self.tokens[outcome_idx]),
+            "expected": self.vocab.decode(self.tokens[outcome_idx]),
             "true_token_dist": (outcome_idx - start_idx).item(),
             "true_token_time": (self.times[outcome_idx] - self.times[start_idx]).item(),
             "patient_id": self.patient_id_at_idx[adm_idx].item(),

@@ -44,7 +44,7 @@ for arg in "$@"; do
 done
 
 # Expose two GPUs to the process
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=4
 export NUM_GPUS=1
 
 echo "Visible GPUs: $CUDA_VISIBLE_DEVICES"
