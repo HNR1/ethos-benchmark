@@ -306,6 +306,7 @@ def preprocess_inference_results(
     max_rep_num: int | None = None,
     group_by_col: str | pl.Expr = "data_idx",
     warn_on_dropped: bool = True,
+    sofa: bool = False,
 ) -> pl.DataFrame:
     df = load_results(input_dir)
     prev_len = len(df)
@@ -334,6 +335,9 @@ def preprocess_inference_results(
             for col_name in ["patient_id", *optional_columns, *(additional_columns or [])]
         ],
     ]
+    if sofa:
+        for i in range(1, 11):
+            aggregations.append((f"Q{i}", "mean"))
     max_rep_num_expr = pl.min_horizontal(max_rep_num, pl.len())
 
     return (
@@ -356,7 +360,7 @@ def preprocess_inference_results(
         )
         .collect()
     )
-
+    
 
 def compute_and_print_metrics(y_true, y_pred, figure_title: str, **kwargs) -> dict:
     basic_res = compute_basic_metrics(y_true, y_pred)
@@ -366,15 +370,11 @@ def compute_and_print_metrics(y_true, y_pred, figure_title: str, **kwargs) -> di
     return basic_res | fitted_res
 
 
-def compute_and_print_metrics_regression(y_true, y_pred, counts: int) -> dict:
+
+def compute_and_print_metrics_regression(y_true, y_pred) -> dict:
     # calc mae between y_true and y_pred
-    true = np.asarray([y.total_seconds() for y in y_true])
-    pred = np.asarray([y.total_seconds() for y in y_pred])
-    mae = np.mean(np.abs(true - pred))
-    mae_td = timedelta(seconds=mae)
-    res = {"mae": mae_td}
-    print(f"MAE: {mae_td} for {len(y_true)*counts} samples")
-    return res
+    mae = np.mean(np.abs(np.array(y_true) - np.array(y_pred)))
+    return {"mae": mae}
 
 
 def plot_calibration_curve(y_true, y_pred, n_bins: int = 10):
