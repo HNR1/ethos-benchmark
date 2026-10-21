@@ -28,7 +28,6 @@ class _InferenceAtTriageDataset(InferenceDataset, ABC):
         ed_reg_idx = self.ed_reg_indices[idx]
         start_idx = self.start_indices[idx]
         outcome_idx = self.outcome_indices[idx]
-        print(f"start_idx: {start_idx}, outcome_idx: {outcome_idx}, ed_reg_idx: {ed_reg_idx}")
 
         ed_hadm_id = self._get_hadm_id(ed_reg_idx)
         ed_stay_id = self._get_ed_stay_id(ed_reg_idx)
@@ -59,10 +58,10 @@ class HospitalAdmissionAtTriageDataset(_InferenceAtTriageDataset):
 
     def __init__(self, input_dir: str | Path, n_positions: int = 2048, **kwargs):
         super().__init__(input_dir, n_positions, **kwargs)
-        self.stop_stokens = [ST.ADMISSION] + self.stop_stokens
-        adm_indices = self._get_indices_of_stokens(ST.ADMISSION)
+        self.stop_stokens = [ST.ADMISSION, ST.ED_DISCHARGE] + self.stop_stokens
+        stop_indices = self._get_indices_of_stokens(self.stop_stokens)
         # TODO: Explain why fill with 0. It doesn't make sense but it does the job.
-        self.outcome_indices = self._match(adm_indices, self.ed_reg_indices, fill_unmatched=0)
+        self.outcome_indices = self._match(stop_indices, self.ed_reg_indices, fill_unmatched=0)
         print(len(self.ed_reg_indices), len(self.outcome_indices))
 
     def __getitem__(self, idx) -> tuple[th.Tensor, dict]:
