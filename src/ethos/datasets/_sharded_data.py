@@ -28,7 +28,7 @@ class ShardedData:
                         "patient_offsets": f.get_tensor("patient_offsets"),
                     }
                 )
-                for mimic_col in ["hadm_id", "icustay_id", "dicom_id"]:
+                for mimic_col in ["hadm_id", "icustay_id", "edstay_id", "dicom_id"]:
                     if mimic_col in f.keys():
                         self.shards[-1][mimic_col] = f.get_slice(mimic_col)
             shard_offset += self.shards[-1]["tokens"].get_shape()[0]
@@ -77,6 +77,10 @@ class ShardedData:
     @property
     def icu_stay_id(self) -> "LookupData":
         return LookupData("icustay_id", self.shards)
+
+    @property
+    def ed_stay_id(self) -> "LookupData":
+        return LookupData("edstay_id", self.shards)
 
     @property
     def dicom_id(self) -> "LookupData":

@@ -85,6 +85,12 @@ class TimelineDataset(th.utils.data.Dataset):
             raise AttributeError("It's not MIMIC, no 'icustay_id' available.")
         return self._data.icu_stay_id
 
+    @property
+    def ed_stay_id(self):
+        if not self.is_mimic:
+            raise AttributeError("It's not MIMIC, no 'edstay_id' available.")
+        return self._data.ed_stay_id
+
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}(len={len(self):,}, "
@@ -176,7 +182,7 @@ class TimelineDataset(th.utils.data.Dataset):
         }
 
         # TODO: This is extremely memory-inefficient.
-        for mimic_col in ["hadm_id", "icustay_id"]:
+        for mimic_col in ["hadm_id", "icustay_id", "edstay_id"]:
             if mimic_col in df.columns:
                 tensors[mimic_col] = df[mimic_col].to_torch()
 
@@ -225,6 +231,8 @@ class InferenceDataset(TimelineDataset, abc.ABC):
 
     def _get_icu_stay_id(self, idx: int) -> int | None:
         return None if th.isnan(icu_stay_id := self.icu_stay_id[idx]) else int(icu_stay_id)
+    def _get_ed_stay_id(self, idx: int) -> int | None:
+        return None if th.isnan(ed_stay_id := self.ed_stay_id[idx]) else int(ed_stay_id)
 
     @abc.abstractmethod
     def __len__(self) -> int:

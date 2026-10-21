@@ -28,13 +28,16 @@ class _InferenceAtTriageDataset(InferenceDataset, ABC):
         ed_reg_idx = self.ed_reg_indices[idx]
         start_idx = self.start_indices[idx]
         outcome_idx = self.outcome_indices[idx]
+        print(f"start_idx: {start_idx}, outcome_idx: {outcome_idx}, ed_reg_idx: {ed_reg_idx}")
 
         ed_hadm_id = self._get_hadm_id(ed_reg_idx)
+        ed_stay_id = self._get_ed_stay_id(ed_reg_idx)
         return super().__getitem__(start_idx), {
             "true_token_dist": (outcome_idx - start_idx).item(),
             "true_token_time": (self.times[outcome_idx] - self.times[start_idx]).item(),
             "patient_id": self.patient_id_at_idx[start_idx].item(),
             "hadm_id": ed_hadm_id,
+            "stay_id": ed_stay_id,
             "prediction_time": self.times[start_idx].item(),
             "data_idx": start_idx.item(),
         }
