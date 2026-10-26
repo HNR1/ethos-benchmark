@@ -307,6 +307,7 @@ def preprocess_inference_results(
     group_by_col: str | pl.Expr = "data_idx",
     warn_on_dropped: bool = True,
     sofa: bool = False,
+    drg : bool = False
 ) -> pl.DataFrame:
     df = load_results(input_dir)
     prev_len = len(df)
@@ -337,7 +338,10 @@ def preprocess_inference_results(
     ]
     if sofa:
         for i in range(1, 11):
-            aggregations.append((f"Q{i}", "mean"))
+            aggregations.append((f"Q{i}", "first"))
+    if drg:
+        drg_columns = [col for col in df.columns if col.startswith("DRG//")]
+        aggregations.extend((col, "first") for col in drg_columns)
     max_rep_num_expr = pl.min_horizontal(max_rep_num, pl.len())
 
     return (
@@ -372,6 +376,12 @@ def compute_and_print_metrics(y_true, y_pred, figure_title: str, **kwargs) -> di
 
 
 def compute_and_print_metrics_regression(y_true, y_pred) -> dict:
+    # calc mae between y_true and y_pred
+    mae = np.mean(np.abs(np.array(y_true) - np.array(y_pred)))
+    return {"mae": mae}
+
+
+def compute_and_print_metrics_drg(y_true, y_pred) -> dict:
     # calc mae between y_true and y_pred
     mae = np.mean(np.abs(np.array(y_true) - np.array(y_pred)))
     return {"mae": mae}
