@@ -19,36 +19,119 @@ from .inference.constants import Reason
 sns.set_theme(context="notebook")
 
 
-def compute_basic_metrics(y_true, y_pred):
+def compute_metrics(
+    y_true,
+    y_pred,
+    operating_point: float | None = None,
+    operating_point_type: str = "01",
+) -> dict:
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+
+    # Empirical ROC curve; thresholds are real score cutoffs.
+    fpr_points, tpr_points, thresholds = roc_curve(
+        y_true, y_pred, drop_intermediate=False
+    )
+
+    positives = np.sum(y_true == 1)
+    negatives = np.sum(y_true == 0)
+
+    if positives == 0 or negatives == 0:
+        raise ValueError("y_true must contain both positive and negative cases.")
+
+    # Select an operating threshold using the original logic.
+    if operating_point is None:
+        if operating_point_type == "01":
+            min_idx = np.argmin(
+                fpr_points**2 + (tpr_points - 1)**2
+            )
+        elif operating_point_type == "Youden":
+            min_idx = np.argmax(tpr_points - fpr_points)
+        elif operating_point_type == "maxF1":
+            tp_values = tpr_points * positives
+            fp_values = fpr_points * negatives
+            fn_values = (1 - tpr_points) * positives
+
+            f1_values = np.divide(
+                2 * tp_values,
+                2 * tp_values + fp_values + fn_values,
+                out=np.zeros_like(tpr_points),
+                where=(2 * tp_values + fp_values + fn_values) > 0,
+            )
+            min_idx = np.argmax(f1_values)
+        else:
+            raise ValueError(
+                "operating_point_type must be one of: "
+                "'01', 'Youden', 'maxF1'"
+            )
+
+        operating_point = thresholds[min_idx]
+    else:
+        # Use the supplied threshold directly.
+        min_idx = int(np.argmin(np.abs(thresholds - operating_point)))
+
+    # Calculate metrics from actual binary predictions.
+    y_pred_binary = (y_pred >= operating_point).astype(int)
+
+    tp = np.sum((y_true == 1) & (y_pred_binary == 1))
+    fn = np.sum((y_true == 1) & (y_pred_binary == 0))
+    tn = np.sum((y_true == 0) & (y_pred_binary == 0))
+    fp = np.sum((y_true == 0) & (y_pred_binary == 1))
+
+    def safe_divide(a, b, zero_value=np.nan):
+        return a / b if b != 0 else zero_value
+
+    sensitivity = safe_divide(tp, tp + fn)
+    specificity = safe_divide(tn, tn + fp)
+    precision = safe_divide(tp, tp + fp)
+    npv = safe_divide(tn, tn + fn)
+    plr = safe_divide(sensitivity, 1 - specificity)
+    nlr = safe_divide(1 - sensitivity, specificity)
+    f1 = safe_divide(2 * tp, 2 * tp + fp + fn, zero_value=0.0)
+    accuracy = (tp + tn) / (positives + negatives)
+
+    # AUC and AUPRC from the actual prediction scores.
+    auc = roc_auc_score(y_true, y_pred)
+
+    precision_points, recall_points, _ = precision_recall_curve(
+        y_true, y_pred
+    )
+    auprc = -np.trapezoid(precision_points, recall_points)
+
+    # Empirical curve values, not fitted/interpolated values.
+    precision_values = precision_points
+    recall_values = recall_points
+
     return {
-        "n": len(y_true),
-        "prevalence": y_true.mean(),
-        "auc": roc_auc_score(y_true, y_pred), 
-        "auprc": np.trapezoid(*roc_curve(y_true, y_pred)[:2]),
+        "auc": auc,
+        "auprc": auprc,
+        "accuracy": accuracy,
+        "sensitivity": sensitivity,
+        "specificity": specificity,
+        "precision": precision,
+        "npv": npv,
+        "plr": plr,
+        "nlr": nlr,
+        "f1": f1,
+        "recall": sensitivity,
+        "precision_points": precision_points,
+        "recall_points": recall_points,
+        "precision_values": precision_values,
+        "recall_values": recall_values,
+        "tpr_points": tpr_points,
+        "fpr_points": fpr_points,
+        "operating_point": operating_point,
+        "operating_point_index_in_values": min_idx,
     }
 
 
-def objective_function(std, points, equal_variance=False):
-    thresholds = np.linspace(-10, 11, num=10000)
-    std2 = std[0] if equal_variance else std[1]
-    cdf_hypothesis_1 = norm.cdf(thresholds, loc=0, scale=std[0])
-    cdf_hypothesis_2 = norm.cdf(thresholds, loc=1, scale=std2)
-    # Calculate the True Positive Rate (TPR) and False Positive Rate (FPR)
-    tpr_values = 1 - cdf_hypothesis_2
-    fpr_values = 1 - cdf_hypothesis_1
-    val = sum(np.min((tpr_values - tpr) ** 2 + (fpr_values - fpr) ** 2) for tpr, fpr in points)
-    return val
-
-
-def compute_fitted_metrics(
+def compute_fitted_curve(
     y_true,
     y_pred,
     equal_variance: bool = False,
-    operating_point: float | None = None,
-    operating_point_type: str = "01",
     auc_interpolation_type="gaussian",  # 'quadratic','linear'
 ) -> dict:
-    fpr_points, tpr_points, thresholds = roc_curve(y_true, y_pred)
+    fpr_points, tpr_points, _ = roc_curve(y_true, y_pred)
     points = np.stack((tpr_points, fpr_points), axis=1).tolist()
 
     # number of samples in interpolation curves
@@ -129,108 +212,34 @@ def compute_fitted_metrics(
         # Calculate interpolated y values
         tpr_values = interpolation_function(fpr_values)
 
-    lattice_idx = [
-        np.argmin((tpr_values - tpr) ** 2 + (fpr_values - fpr) ** 2) for tpr, fpr in points
-    ]
-
-    if operating_point is None:
-        match operating_point_type:
-            case "01":
-                # Find the best operating point defined as the closest point to (0,1)
-                min_idx = np.argmin(fpr_values**2 + (tpr_values - 1) ** 2)
-            case "Youden":
-                # Find the best operating point defined as the point with the maximum Youden index
-                min_idx = np.argmax(tpr_values - fpr_values)
-            case "maxF1":
-                # Find the best operating point defined as the point with the maximum F1 score
-                min_idx = np.argmax(
-                    2 * tpr_values * (1 - fpr_values) / (tpr_values + (1 - fpr_values))
-                )
-            case _:
-                raise ValueError("operating_point_type must be one of: '01', 'Youden', 'maxF1'")
-
-        # fit interpolation function between y and x points,
-        # where y is thresholds and x is lattice_points
-        f = np.poly1d(np.polyfit(lattice_idx[1:-1], thresholds[1:-1], 3))
-        operating_point = f(min_idx)
-    else:  # use provided operating point
-        f = np.poly1d(np.polyfit(lattice_idx[1:-1], thresholds[1:-1], 3))
-        min_idx_start = int((0 - min_v) / (max_v - min_v) * samples)
-        max_idx_start = int((1 - min_v) / (max_v - min_v) * samples)
-        # find the closest point to the operating point
-        diff = f(np.arange(min_idx_start, max_idx_start - 1)) - operating_point
-        min_idx = np.argmin(diff**2) + min_idx_start
-
-    fpr = fpr_values[min_idx]
-    tpr = tpr_values[min_idx]
-
-    positives = np.sum(np.asarray(y_true) == 1)
-    negatives = len(y_true) - positives
-
-    denominator = tpr_values * positives + fpr_values * negatives
-    recall_values = tpr_values
-    more_than_zero = denominator > 0
-    precision_values = np.divide(tpr_values * positives, denominator, where=more_than_zero, out=None)
-    precision_values[~more_than_zero] = 1
-    # =======================================================
-    # Compute metrics now using the operating point
-    # =======================================================
-
-    tp = tpr * positives
-    fn = (1 - tpr) * positives
-    tn = (1 - fpr) * negatives
-    fp = fpr * negatives
-
-    # tier 1
-    auprc = -np.trapezoid(precision_values, recall_values)
-    auc = -np.trapezoid(tpr_values, fpr_values)
-    accuracy = (tp + tn) / (positives + negatives)
-    sensitivity = tpr
-    specificity = 1 - fpr
-
-    precision = tp / (tp + fp)
-    npv = tn / (tn + fn)
-    plr = sensitivity / (1 - specificity)
-    nlr = (1 - sensitivity) / specificity
-    f1 = tp / (tp + (fp + fn) / 2)
-
-    precision_points, recall_points, _ = precision_recall_curve(y_true, y_pred)
-    
     return {
-        "auc": auc,
-        "auprc": auprc,
-        "accuracy": accuracy,
-        "sensitivity": sensitivity,
-        "specificity": specificity,
-        "precision": precision,
-        "npv": npv,
-        "plr": plr,
-        "nlr": nlr,
-        "f1": f1,
-        "recall": tpr,
-        "precision_points": precision_points,
-        "recall_points": recall_points,
-        "precision_values": precision_values,
-        "recall_values": recall_values,
-        "tpr_points": tpr_points,
-        "fpr_points": fpr_points,
         "tpr_values": tpr_values[::-1],
         "fpr_values": fpr_values[::-1],
-        "operating_point": operating_point,
-        "operating_point_index_in_values": samples - 1 - min_idx,
     }
 
 
-def print_auc_roc_plot(res, fitted_res, title="AUC-ROC", lw=2, clinical=False):
+def objective_function(std, points, equal_variance=False):
+    thresholds = np.linspace(-10, 11, num=10000)
+    std2 = std[0] if equal_variance else std[1]
+    cdf_hypothesis_1 = norm.cdf(thresholds, loc=0, scale=std[0])
+    cdf_hypothesis_2 = norm.cdf(thresholds, loc=1, scale=std2)
+    # Calculate the True Positive Rate (TPR) and False Positive Rate (FPR)
+    tpr_values = 1 - cdf_hypothesis_2
+    fpr_values = 1 - cdf_hypothesis_1
+    val = sum(np.min((tpr_values - tpr) ** 2 + (fpr_values - fpr) ** 2) for tpr, fpr in points)
+    return val
+
+
+def print_auc_roc_plot(res,  title="AUC-ROC", lw=2, clinical=False):
     plt.plot([0, 1], [0, 1], color="grey", lw=lw, linestyle="--", label="Random Guess")
     plt.plot(
-        fitted_res["fpr_values"],
-        fitted_res["tpr_values"],
+        res["fpr_values"],
+        res["tpr_values"],
         color="darkorange",
         lw=lw,
         label="AUC-ROC Fitted",
     )
-    plt.scatter(fitted_res["fpr_points"], fitted_res["tpr_points"])
+    plt.scatter(res["fpr_points"], res["tpr_points"])
     plt.xlim([0, 1.01])
     plt.ylim([0, 1.01])
     plt.xlabel("False Positive Rate (1 - Specificity)")
@@ -244,21 +253,15 @@ def print_auc_roc_plot(res, fitted_res, title="AUC-ROC", lw=2, clinical=False):
     if clinical:
         text.extend(
             [
-                f"auc={fitted_res['auc']:.3f}",
+                f"auc={res['auc']:.3f}",
             ]
         )
     else:
         text.extend(
             [
                 f"AUC: {res['auc']:.3f}",
-                f"95% CI: {fitted_res['ci'][0]:.3f} - {fitted_res['ci'][1]:.3f}",
+                f"95% CI: {res['ci'][0]:.3f} - {res['ci'][1]:.3f}",
                 f"AUPRC: {res['auprc']:.3f}",
-                # f"fitted_auc={fitted_res['auc']:.3f}",
-                # f"fitted_auprc={fitted_res['auprc']:.3f}",
-                # f"fitted_f1-score={fitted_res['f1']:.3f}",
-                # f"fitted_precision={fitted_res['precision']:.3f}",
-                # f"fitted_recall={fitted_res['recall']:.3f}",
-                # f"fitted_accuracy={fitted_res['accuracy']:.3f}",
             ]
         )
     anc = AnchoredText(
@@ -367,19 +370,43 @@ def preprocess_inference_results(
     )
     
 
-def compute_and_print_metrics(y_true, y_pred, ci, figure_title: str, **kwargs) -> dict:
-    basic_res = compute_basic_metrics(y_true, y_pred)
-    fitted_res = compute_fitted_metrics(y_true, y_pred, **kwargs)
-    fitted_res["ci"] = ci
-    print_auc_roc_plot(basic_res, fitted_res, figure_title)
-    fitted_res = {f"fitted_{k}": v for k, v in fitted_res.items()}
-    return basic_res | fitted_res
+def compute_and_print_metrics(y_true, y_pred, figure_title: str, **kwargs) -> dict:
+    res = compute_metrics(y_true, y_pred, **kwargs)
+    curve_val = compute_fitted_curve(y_true, y_pred)
+    res.update(curve_val)
+    res["n"] = len(y_true)
+    res["prevalence"] = np.mean(y_true)
+    res["ci"] = compute_auc_ci(y_true, y_pred)[0]
+
+    print_auc_roc_plot(res, figure_title)
+
+    return res
 
 
 def compute_and_print_metrics_regression(y_true, y_pred) -> dict:
-    # calc mae between y_true and y_pred
-    mae = np.mean(np.abs(np.array(y_true) - np.array(y_pred)))
-    return {"mae": mae}
+    # Individual absolute errors
+    absolute_errors = np.abs(y_pred - y_true)
+
+    # Observed MAE
+    mae = np.mean(absolute_errors)
+
+    # Bootstrap 95% CI
+    rng = np.random.default_rng(42)
+    n_bootstrap = 10000
+
+    bootstrap_maes = np.empty(n_bootstrap)
+
+    for i in range(n_bootstrap):
+        indices = rng.integers(
+            0,
+            len(absolute_errors),
+            size=len(absolute_errors),
+        )
+        bootstrap_maes[i] = np.mean(absolute_errors[indices])
+
+    ci = np.percentile(bootstrap_maes, [2.5, 97.5])
+    
+    return {"mae": mae, "ci": ci}
 
 
 def compute_and_print_metrics_drg(y_true, y_pred) -> dict:
@@ -412,6 +439,42 @@ def compute_ci(y_true, y_proba, n_bootstraps=1000, seed=42, auprc=False) -> list
     tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
     tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
     return np.percentile(aucs, [2.5, 97.5]), mean_fpr, tprs_lower, tprs_upper
+
+
+def compute_auc_ci(y_true, y_proba, n_bootstraps=1000, seed=42):
+    rng = np.random.default_rng(seed)
+
+    n = len(y_true)
+    mean_fpr = np.linspace(0, 1, 100)
+
+    scores = np.empty(n_bootstraps)
+    curves = np.empty((n_bootstraps, len(mean_fpr)))
+
+    for i in range(n_bootstraps):
+        indices = rng.integers(0, n, size=n)
+
+        y = y_true[indices]
+        p = y_proba[indices]
+
+        fpr, tpr, _ = roc_curve(y, p)
+
+        scores[i] = roc_auc_score(y, p)
+
+        curve = np.interp(mean_fpr, fpr, tpr)
+        curve[0] = 0.0
+        curves[i] = curve
+
+    mean_tpr = curves.mean(axis=0)
+    std_tpr = curves.std(axis=0)
+
+    mean_tpr[-1] = 1.0
+
+    return (
+        np.percentile(scores, [2.5, 97.5]),
+        mean_fpr,
+        np.clip(mean_tpr - std_tpr, 0, 1),
+        np.clip(mean_tpr + std_tpr, 0, 1),
+    )
 
 
 def plot_calibration_curve(y_true, y_pred, n_bins: int = 10):

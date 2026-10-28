@@ -44,8 +44,8 @@ for arg in "$@"; do
 done
 
 # Expose two GPUs to the process
-export CUDA_VISIBLE_DEVICES=7
-export NUM_GPUS=1
+export CUDA_VISIBLE_DEVICES=5,6
+export NUM_GPUS=2
 
 echo "Visible GPUs: $CUDA_VISIBLE_DEVICES"
 
@@ -60,7 +60,7 @@ run_inference() {
         "output_dir=${output_dir}" \
         "output_fn=${output_fn}" \
         "${extra_args[@]}" \
-        n_gpus=1 \
+        n_gpus=2 \
         "rep_num=${rep_num}"
 }
 
@@ -88,7 +88,7 @@ if command -v singularity >/dev/null 2>&1; then
         "output_dir=/ethos/${output_dir}" \
         "output_fn=${output_fn}" \
         "${extra_args[@]}" \
-        n_gpus=1 \
+        n_gpus=2 \
         "rep_num=${rep_num}"
 else
     run_inference
