@@ -170,7 +170,7 @@ def compute_fitted_metrics(
     denominator = tpr_values * positives + fpr_values * negatives
     recall_values = tpr_values
     more_than_zero = denominator > 0
-    precision_values = np.divide(tpr_values * positives, denominator, where=more_than_zero)
+    precision_values = np.divide(tpr_values * positives, denominator, where=more_than_zero, out=None)
     precision_values[~more_than_zero] = 1
     # =======================================================
     # Compute metrics now using the operating point
@@ -238,8 +238,8 @@ def print_auc_roc_plot(res, fitted_res, title="AUC-ROC", lw=2, clinical=False):
     plt.title(title)
 
     text = [
-        f"N={res['n']:,}",
-        f"prevalence={res['prevalence']:.2%}",
+        f"N: {res['n']:,} ({res['prevalence']:.2%} positives)",
+        # f"prevalence={res['prevalence']:.2%}",
     ]
     if clinical:
         text.extend(
@@ -250,14 +250,15 @@ def print_auc_roc_plot(res, fitted_res, title="AUC-ROC", lw=2, clinical=False):
     else:
         text.extend(
             [
-                f"auc={res['auc']:.3f}",
-                f"auprc={res['auprc']:.3f}",
-                f"fitted_auc={fitted_res['auc']:.3f}",
-                f"fitted_auprc={fitted_res['auprc']:.3f}",
-                f"fitted_f1-score={fitted_res['f1']:.3f}",
-                f"fitted_precision={fitted_res['precision']:.3f}",
-                f"fitted_recall={fitted_res['recall']:.3f}",
-                f"fitted_accuracy={fitted_res['accuracy']:.3f}",
+                f"AUC: {res['auc']:.3f}",
+                f"95% CI: {fitted_res['ci'][0]:.3f} - {fitted_res['ci'][1]:.3f}",
+                f"AUPRC: {res['auprc']:.3f}",
+                # f"fitted_auc={fitted_res['auc']:.3f}",
+                # f"fitted_auprc={fitted_res['auprc']:.3f}",
+                # f"fitted_f1-score={fitted_res['f1']:.3f}",
+                # f"fitted_precision={fitted_res['precision']:.3f}",
+                # f"fitted_recall={fitted_res['recall']:.3f}",
+                # f"fitted_accuracy={fitted_res['accuracy']:.3f}",
             ]
         )
     anc = AnchoredText(
@@ -366,13 +367,13 @@ def preprocess_inference_results(
     )
     
 
-def compute_and_print_metrics(y_true, y_pred, figure_title: str, **kwargs) -> dict:
+def compute_and_print_metrics(y_true, y_pred, ci, figure_title: str, **kwargs) -> dict:
     basic_res = compute_basic_metrics(y_true, y_pred)
     fitted_res = compute_fitted_metrics(y_true, y_pred, **kwargs)
+    fitted_res["ci"] = ci
     print_auc_roc_plot(basic_res, fitted_res, figure_title)
     fitted_res = {f"fitted_{k}": v for k, v in fitted_res.items()}
     return basic_res | fitted_res
-
 
 
 def compute_and_print_metrics_regression(y_true, y_pred) -> dict:
@@ -385,6 +386,32 @@ def compute_and_print_metrics_drg(y_true, y_pred) -> dict:
     # calc mae between y_true and y_pred
     mae = np.mean(np.abs(np.array(y_true) - np.array(y_pred)))
     return {"mae": mae}
+
+
+def compute_ci(y_true, y_proba, n_bootstraps=1000, seed=42, auprc=False) -> list:
+    np.random.seed(seed)
+    aucs = []
+    tprs = []
+    mean_fpr = np.linspace(0, 1, 100)
+
+    score_name = "auprc" if auprc else "auc"
+    x_name = ("recall" if auprc else "fpr") + "_values"
+    y_name = ("precision" if auprc else "tpr") + "_values"
+
+    for _ in range(n_bootstraps):
+        indices = np.random.choice(len(y_true), len(y_true), replace=True)
+        y_true_boot = y_true.values[indices]
+        y_proba_boot = y_proba.values[indices]
+        res = compute_fitted_metrics(y_true_boot, y_proba_boot)
+        aucs.append(res[score_name])
+        tprs.append(np.interp(mean_fpr, res[x_name], res[y_name]))
+        tprs[-1][0] = 0.0
+    mean_tpr = np.mean(tprs, axis=0)
+    mean_tpr[-1] = 1.0  # Ensure ending at 1
+    std_tpr = np.std(tprs, axis=0)
+    tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
+    tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
+    return np.percentile(aucs, [2.5, 97.5]), mean_fpr, tprs_lower, tprs_upper
 
 
 def plot_calibration_curve(y_true, y_pred, n_bins: int = 10):
