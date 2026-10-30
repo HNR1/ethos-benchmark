@@ -28,7 +28,6 @@ def compute_metrics(
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
 
-    # Empirical ROC curve; thresholds are real score cutoffs.
     fpr_points, tpr_points, thresholds = roc_curve(
         y_true, y_pred, drop_intermediate=False
     )
@@ -39,7 +38,6 @@ def compute_metrics(
     if positives == 0 or negatives == 0:
         raise ValueError("y_true must contain both positive and negative cases.")
 
-    # Select an operating threshold using the original logic.
     if operating_point is None:
         if operating_point_type == "01":
             min_idx = np.argmin(
@@ -67,10 +65,8 @@ def compute_metrics(
 
         operating_point = thresholds[min_idx]
     else:
-        # Use the supplied threshold directly.
         min_idx = int(np.argmin(np.abs(thresholds - operating_point)))
 
-    # Calculate metrics from actual binary predictions.
     y_pred_binary = (y_pred >= operating_point).astype(int)
 
     tp = np.sum((y_true == 1) & (y_pred_binary == 1))
@@ -90,7 +86,6 @@ def compute_metrics(
     f1 = safe_divide(2 * tp, 2 * tp + fp + fn, zero_value=0.0)
     accuracy = (tp + tn) / (positives + negatives)
 
-    # AUC and AUPRC from the actual prediction scores.
     auc = roc_auc_score(y_true, y_pred)
 
     precision_points, recall_points, _ = precision_recall_curve(
