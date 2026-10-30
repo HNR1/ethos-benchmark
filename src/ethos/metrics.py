@@ -16,7 +16,7 @@ from datetime import timedelta
 
 from .inference.constants import Reason
 
-sns.set_theme(context="notebook")
+# sns.set_theme(context="notebook")
 
 
 def compute_metrics(
@@ -98,10 +98,6 @@ def compute_metrics(
     )
     auprc = -np.trapezoid(precision_points, recall_points)
 
-    # Empirical curve values, not fitted/interpolated values.
-    precision_values = precision_points
-    recall_values = recall_points
-
     return {
         "auc": auc,
         "auprc": auprc,
@@ -109,15 +105,14 @@ def compute_metrics(
         "sensitivity": sensitivity,
         "specificity": specificity,
         "precision": precision,
+        "tp": tp,
+        "tn": tn,
+        "fp": fp,
+        "fn": fn,
         "npv": npv,
         "plr": plr,
         "nlr": nlr,
         "f1": f1,
-        "recall": sensitivity,
-        "precision_points": precision_points,
-        "recall_points": recall_points,
-        "precision_values": precision_values,
-        "recall_values": recall_values,
         "tpr_points": tpr_points,
         "fpr_points": fpr_points,
         "operating_point": operating_point,
@@ -231,6 +226,8 @@ def objective_function(std, points, equal_variance=False):
 
 
 def print_auc_roc_plot(res,  title="AUC-ROC", lw=2, clinical=False):
+    plt.figure(figsize=(6, 6))
+    plt.rcParams.update({"font.size": 13})
     plt.plot([0, 1], [0, 1], color="grey", lw=lw, linestyle="--", label="Random Guess")
     plt.plot(
         res["fpr_values"],
