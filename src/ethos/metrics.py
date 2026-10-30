@@ -226,8 +226,8 @@ def objective_function(std, points, equal_variance=False):
 
 
 def print_auc_roc_plot(res,  title="AUC-ROC", lw=2, clinical=False):
-    plt.figure(figsize=(6, 6))
-    plt.rcParams.update({"font.size": 13})
+    plt.figure(figsize=(5, 5))
+    plt.rcParams.update({"font.size": 12})
     plt.plot([0, 1], [0, 1], color="grey", lw=lw, linestyle="--", label="Random Guess")
     plt.plot(
         res["fpr_values"],
