@@ -208,6 +208,187 @@ def compute_fitted_curve(
     }
 
 
+def compute_fitted_metrics(
+    y_true,
+    y_pred,
+    equal_variance: bool = False,
+    operating_point: float | None = None,
+    operating_point_type: str = "01",
+    auc_interpolation_type="gaussian",  # 'quadratic','linear'
+) -> dict:
+    fpr_points, tpr_points, thresholds = roc_curve(y_true, y_pred)
+    points = np.stack((tpr_points, fpr_points), axis=1).tolist()
+
+    # number of samples in interpolation curves
+    samples = 10000
+    tpr_values = np.linspace(0, 1, samples)
+    fpr_values = np.linspace(0, 1, samples)
+    if auc_interpolation_type == "gaussian":
+        delta = 1e-6
+        upper_const = 10
+        # Define the range constraints for x and y
+        std_constraint = {
+            "type": "ineq",
+            "fun": lambda x: np.array([x[0] - delta, upper_const - x[0]]),
+        }
+        std2_constraint = {
+            "type": "ineq",
+            "fun": lambda x: np.array([x[1] - delta, upper_const - x[1]]),
+        }
+        if equal_variance:
+            constraints = [std_constraint]
+            x0 = np.array([1.0])
+        else:
+            constraints = [std_constraint, std2_constraint]
+            x0 = np.array([0.5, 0.5])
+
+        result = minimize(objective_function, x0, args=(points,), constraints=constraints)
+
+        if equal_variance:
+            optimal_x = result.x
+        else:
+            optimal_x, optimal_y = result.x
+
+        # Parameters for hypothesis 1 (mean and standard deviation)
+        mean_hypothesis_1 = 0.0
+        std_dev_hypothesis_1 = optimal_x
+
+        # Parameters for hypothesis 2 (mean and standard deviation)
+        mean_hypothesis_2 = 1
+        std_dev_hypothesis_2 = optimal_x
+        if not equal_variance:
+            std_dev_hypothesis_2 = optimal_y
+
+        # Calculate the cumulative distribution functions (CDFs) for the two distributions
+        min_v = -5
+        max_v = 10
+        lattice_points = np.linspace(min_v, max_v, num=samples)
+
+        cdf_hypothesis_1 = norm.cdf(
+            lattice_points, loc=mean_hypothesis_1, scale=std_dev_hypothesis_1
+        )
+        cdf_hypothesis_2 = norm.cdf(
+            lattice_points, loc=mean_hypothesis_2, scale=std_dev_hypothesis_2
+        )
+        # Calculate the True Positive Rate (TPR) and False Positive Rate (FPR)
+        tpr_values = 1 - cdf_hypothesis_2
+        fpr_values = 1 - cdf_hypothesis_1
+    elif auc_interpolation_type == "linear" or auc_interpolation_type == "quadratic":
+        unique_fpr_points = []
+        unique_tpr_points = []
+
+        fpr_dict = defaultdict(list)
+        for x, y in zip(fpr_points, tpr_points):
+            fpr_dict[x].append(y)
+
+        for x, y_values in fpr_dict.items():
+            unique_fpr_points.append(x)
+            unique_tpr_points.append(np.mean(y_values))  # Take the mean of Y values for duplicates
+
+        # Generate 10,000 equidistant points in the range of X
+        # Note this is not ideal as interpolation point should be equdistanmt in 2D
+        fpr_values = np.linspace(
+            np.array(unique_fpr_points).max(), np.array(unique_fpr_points).min(), samples
+        )
+        # Create the interpolation function
+        interpolation_function = interp1d(
+            unique_fpr_points, unique_tpr_points, kind=auc_interpolation_type
+        )
+        # Calculate interpolated y values
+        tpr_values = interpolation_function(fpr_values)
+
+    lattice_idx = [
+        np.argmin((tpr_values - tpr) ** 2 + (fpr_values - fpr) ** 2) for tpr, fpr in points
+    ]
+
+    if operating_point is None:
+        match operating_point_type:
+            case "01":
+                # Find the best operating point defined as the closest point to (0,1)
+                min_idx = np.argmin(fpr_values**2 + (tpr_values - 1) ** 2)
+            case "Youden":
+                # Find the best operating point defined as the point with the maximum Youden index
+                min_idx = np.argmax(tpr_values - fpr_values)
+            case "maxF1":
+                # Find the best operating point defined as the point with the maximum F1 score
+                min_idx = np.argmax(
+                    2 * tpr_values * (1 - fpr_values) / (tpr_values + (1 - fpr_values))
+                )
+            case _:
+                raise ValueError("operating_point_type must be one of: '01', 'Youden', 'maxF1'")
+
+        # fit interpolation function between y and x points,
+        # where y is thresholds and x is lattice_points
+        f = np.poly1d(np.polyfit(lattice_idx[1:-1], thresholds[1:-1], 3))
+        operating_point = f(min_idx)
+    else:  # use provided operating point
+        f = np.poly1d(np.polyfit(lattice_idx[1:-1], thresholds[1:-1], 3))
+        min_idx_start = int((0 - min_v) / (max_v - min_v) * samples)
+        max_idx_start = int((1 - min_v) / (max_v - min_v) * samples)
+        # find the closest point to the operating point
+        diff = f(np.arange(min_idx_start, max_idx_start - 1)) - operating_point
+        min_idx = np.argmin(diff**2) + min_idx_start
+
+    fpr = fpr_values[min_idx]
+    tpr = tpr_values[min_idx]
+
+    positives = np.sum(np.asarray(y_true) == 1)
+    negatives = len(y_true) - positives
+
+    denominator = tpr_values * positives + fpr_values * negatives
+    recall_values = tpr_values
+    more_than_zero = denominator > 0
+    precision_values = np.divide(tpr_values * positives, denominator, where=more_than_zero)
+    precision_values[~more_than_zero] = 1
+    # =======================================================
+    # Compute metrics now using the operating point
+    # =======================================================
+
+    tp = tpr * positives
+    fn = (1 - tpr) * positives
+    tn = (1 - fpr) * negatives
+    fp = fpr * negatives
+
+    # tier 1
+    auprc = -np.trapezoid(precision_values, recall_values)
+    auc = -np.trapezoid(tpr_values, fpr_values)
+    accuracy = (tp + tn) / (positives + negatives)
+    sensitivity = tpr
+    specificity = 1 - fpr
+
+    precision = tp / (tp + fp)
+    npv = tn / (tn + fn)
+    plr = sensitivity / (1 - specificity)
+    nlr = (1 - sensitivity) / specificity
+    f1 = tp / (tp + (fp + fn) / 2)
+
+    precision_points, recall_points, _ = precision_recall_curve(y_true, y_pred)
+
+    return {
+        "auc": auc,
+        "auprc": auprc,
+        "accuracy": accuracy,
+        "sensitivity": sensitivity,
+        "specificity": specificity,
+        "precision": precision,
+        "npv": npv,
+        "plr": plr,
+        "nlr": nlr,
+        "f1": f1,
+        "recall": tpr,
+        "precision_points": precision_points,
+        "recall_points": recall_points,
+        "precision_values": precision_values,
+        "recall_values": recall_values,
+        "tpr_points": tpr_points,
+        "fpr_points": fpr_points,
+        "tpr_values": tpr_values[::-1],
+        "fpr_values": fpr_values[::-1],
+        "operating_point": operating_point,
+        "operating_point_index_in_values": samples - 1 - min_idx,
+    }
+
+
 def objective_function(std, points, equal_variance=False):
     thresholds = np.linspace(-10, 11, num=10000)
     std2 = std[0] if equal_variance else std[1]
