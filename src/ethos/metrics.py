@@ -86,16 +86,7 @@ def compute_metrics(
     f1 = safe_divide(2 * tp, 2 * tp + fp + fn, zero_value=0.0)
     accuracy = (tp + tn) / (positives + negatives)
 
-    auc = roc_auc_score(y_true, y_pred)
-
-    precision_points, recall_points, _ = precision_recall_curve(
-        y_true, y_pred
-    )
-    auprc = -np.trapezoid(precision_points, recall_points)
-
     return {
-        "auc": auc,
-        "auprc": auprc,
         "accuracy": accuracy,
         "sensitivity": sensitivity,
         "specificity": specificity,
@@ -329,63 +320,23 @@ def compute_fitted_metrics(
         diff = f(np.arange(min_idx_start, max_idx_start - 1)) - operating_point
         min_idx = np.argmin(diff**2) + min_idx_start
 
-    fpr = fpr_values[min_idx]
-    tpr = tpr_values[min_idx]
-
     positives = np.sum(np.asarray(y_true) == 1)
     negatives = len(y_true) - positives
 
     denominator = tpr_values * positives + fpr_values * negatives
     recall_values = tpr_values
     more_than_zero = denominator > 0
-    precision_values = np.divide(tpr_values * positives, denominator, where=more_than_zero)
+    precision_values = np.divide(tpr_values * positives, denominator, where=more_than_zero, out=None)
     precision_values[~more_than_zero] = 1
-    # =======================================================
-    # Compute metrics now using the operating point
-    # =======================================================
 
-    tp = tpr * positives
-    fn = (1 - tpr) * positives
-    tn = (1 - fpr) * negatives
-    fp = fpr * negatives
-
-    # tier 1
     auprc = -np.trapezoid(precision_values, recall_values)
     auc = -np.trapezoid(tpr_values, fpr_values)
-    accuracy = (tp + tn) / (positives + negatives)
-    sensitivity = tpr
-    specificity = 1 - fpr
-
-    precision = tp / (tp + fp)
-    npv = tn / (tn + fn)
-    plr = sensitivity / (1 - specificity)
-    nlr = (1 - sensitivity) / specificity
-    f1 = tp / (tp + (fp + fn) / 2)
-
-    precision_points, recall_points, _ = precision_recall_curve(y_true, y_pred)
 
     return {
         "auc": auc,
         "auprc": auprc,
-        "accuracy": accuracy,
-        "sensitivity": sensitivity,
-        "specificity": specificity,
-        "precision": precision,
-        "npv": npv,
-        "plr": plr,
-        "nlr": nlr,
-        "f1": f1,
-        "recall": tpr,
-        "precision_points": precision_points,
-        "recall_points": recall_points,
-        "precision_values": precision_values,
-        "recall_values": recall_values,
-        "tpr_points": tpr_points,
-        "fpr_points": fpr_points,
         "tpr_values": tpr_values[::-1],
         "fpr_values": fpr_values[::-1],
-        "operating_point": operating_point,
-        "operating_point_index_in_values": samples - 1 - min_idx,
     }
 
 
@@ -544,12 +495,16 @@ def preprocess_inference_results(
     
 
 def compute_and_print_metrics(y_true, y_pred, figure_title: str, **kwargs) -> dict:
+    # res = compute_metrics(y_true, y_pred, **kwargs)
+    # curve_val = compute_fitted_curve(y_true, y_pred)
+    # res.update(curve_val)
     res = compute_metrics(y_true, y_pred, **kwargs)
-    curve_val = compute_fitted_curve(y_true, y_pred)
-    res.update(curve_val)
+    fitted_res = compute_fitted_metrics(y_true, y_pred, **kwargs)
+    res.update(fitted_res)
+    res["ci"] = compute_ci(y_true, y_pred)
     res["n"] = len(y_true)
     res["prevalence"] = np.mean(y_true)
-    res["ci"] = compute_auc_ci(y_true, y_pred)[0]
+    # res["ci"] = compute_auc_ci(y_true, y_pred)[0]
 
     print_auc_roc_plot(res, figure_title)
 
@@ -588,30 +543,110 @@ def compute_and_print_metrics_drg(y_true, y_pred) -> dict:
     return {"mae": mae}
 
 
-def compute_ci(y_true, y_proba, n_bootstraps=1000, seed=42, auprc=False) -> list:
-    np.random.seed(seed)
-    aucs = []
-    tprs = []
-    mean_fpr = np.linspace(0, 1, 100)
+def compute_ci(
+    y_true,
+    y_pred,
+    n_bootstraps=1000,
+    seed=42,
+    equal_variance=False,
+):
+    rng = np.random.default_rng(seed)
 
-    score_name = "auprc" if auprc else "auc"
-    x_name = ("recall" if auprc else "fpr") + "_values"
-    y_name = ("precision" if auprc else "tpr") + "_values"
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+
+    aucs = []
 
     for _ in range(n_bootstraps):
-        indices = np.random.choice(len(y_true), len(y_true), replace=True)
-        y_true_boot = y_true.values[indices]
-        y_proba_boot = y_proba.values[indices]
-        res = compute_fitted_metrics(y_true_boot, y_proba_boot)
-        aucs.append(res[score_name])
-        tprs.append(np.interp(mean_fpr, res[x_name], res[y_name]))
-        tprs[-1][0] = 0.0
-    mean_tpr = np.mean(tprs, axis=0)
-    mean_tpr[-1] = 1.0  # Ensure ending at 1
-    std_tpr = np.std(tprs, axis=0)
-    tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
-    tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
-    return np.percentile(aucs, [2.5, 97.5]), mean_fpr, tprs_lower, tprs_upper
+        indices = rng.integers(
+            0,
+            len(y_true),
+            size=len(y_true),
+        )
+
+        y_true_boot = y_true[indices]
+        y_pred_boot = y_pred[indices]
+
+        # Both classes must be present
+        if len(np.unique(y_true_boot)) < 2:
+            continue
+
+        auc = compute_fitted_auc(
+            y_true_boot,
+            y_pred_boot,
+            equal_variance=equal_variance,
+        )
+
+        if np.isfinite(auc):
+            aucs.append(auc)
+
+    if len(aucs) < 10:
+        raise RuntimeError(
+            "Too few successful bootstrap iterations."
+        )
+
+    return tuple(
+        np.percentile(aucs, [2.5, 97.5])
+    )
+
+
+def compute_fitted_auc(
+    y_true,
+    y_pred,
+    equal_variance=False,
+):
+    # Calculate empirical ROC points
+    fpr, tpr, _ = roc_curve(y_true, y_pred)
+
+    points = np.stack((tpr, fpr), axis=1).tolist()
+
+    # Optimization constraints
+    delta = 1e-6
+    upper_const = 10
+
+    std_constraint = {
+        "type": "ineq",
+        "fun": lambda x: np.array([
+            x[0] - delta,
+            upper_const - x[0],
+        ]),
+    }
+
+    if equal_variance:
+        constraints = [std_constraint]
+        x0 = np.array([1.0])
+    else:
+        std2_constraint = {
+            "type": "ineq",
+            "fun": lambda x: np.array([
+                x[1] - delta,
+                upper_const - x[1],
+            ]),
+        }
+
+        constraints = [std_constraint, std2_constraint]
+        x0 = np.array([0.5, 0.5])
+
+    # Fit Gaussian ROC model
+    result = minimize(
+        objective_function,
+        x0,
+        args=(points,),
+        constraints=constraints,
+    )
+
+    if not result.success:
+        return np.nan
+
+    std1 = result.x[0]
+    std2 = std1 if equal_variance else result.x[1]
+
+    # Analytic Gaussian/binormal AUC
+    auc = norm.cdf(
+        1 / np.sqrt(std1**2 + std2**2)
+    )
+
+    return auc
 
 
 def compute_auc_ci(y_true, y_proba, n_bootstraps=1000, seed=42):
