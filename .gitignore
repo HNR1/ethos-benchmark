@@ -4,6 +4,7 @@
 
 # generally we don't store data files in the repo
 data/
+debug_results/
 results/
 cache/
 multirun/
