@@ -1,5 +1,5 @@
 > [!NOTE]
-> This is the README of the original repo by Renc et al. The instructions are still accurate.
+> This is the README of the original repo by Renc et al. The instructions are still accurate. Run MEDS conversion only once and use output for both ETHOS and TFN-Neo.
 
 > [!NOTE]
 > All data files in the `src/ethos/tokenize/maps` directory are under the CC0 public domain waiver.
