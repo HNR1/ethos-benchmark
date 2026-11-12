@@ -54,7 +54,7 @@ derivatives, and we conclude that these components are not suitable for publicat
 
 ## Pre-tokenization step
 > [!NOTE]
-> This is now redundant if run_meds.sh script from TFN-Neo repo has already been executed. Just use insert the correct directory and move on to the next step.
+> This is now redundant if run_meds.sh script from TFN-Neo repo has already been executed. Just insert the correct directory and move on to the next step.
 
 ETHOS tokenization uses an intermediate
 format [MEDS](https://github.com/Medical-Event-Data-Standard/meds), extracted via
