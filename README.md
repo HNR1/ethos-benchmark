@@ -1,4 +1,7 @@
 > [!NOTE]
+> This is the README of the original repo by Renc et al. It is still accurate.
+
+> [!NOTE]
 > All data files in the `src/ethos/tokenize/maps` directory are under the CC0 public domain waiver.
 
 # ETHOS - EHR foundation model
